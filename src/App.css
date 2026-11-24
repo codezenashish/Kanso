@@ -1,5 +1,7 @@
 @import "tailwindcss";
-
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@import "@fontsource-variable/geist";
 @custom-variant dark (&:is(.dark *));
 
 :root {
@@ -169,8 +171,32 @@
   --tracking-wider: calc(var(--tracking-normal) + 0.05em);
   --tracking-widest: calc(var(--tracking-normal) + 0.1em);
 }
-
 @layer components {
+  .ProseMirror :is(ul, ol) {
+    @apply ps-5;
+  }
+
+  .ProseMirror :is(ul, ol):has(> [data-task]):not(:has(> li:not([data-task]))) {
+    @apply ps-0;
+  }
+
+  .ProseMirror [data-task] {
+    @apply grid grid-cols-[auto_minmax(0,1fr)] items-start gap-2 py-0.5;
+  }
+
+  .ProseMirror [data-task="true"] > [data-task-content] > p:first-child {
+    @apply text-muted-foreground line-through;
+  }
+
+  .ProseMirror [data-task-content] > p:has(> .ProseMirror-trailingBreak:only-child) {
+    @apply relative;
+  }
+
+  .ProseMirror [data-task-content] > p:has(> .ProseMirror-trailingBreak:only-child)::before {
+    content: 'Add a task';
+    @apply pointer-events-none absolute text-muted-foreground/80;
+  }
+
   .heading {
     @apply text-2xl md:text-3xl lg:text-4xl font-bold text-foreground;
   }
@@ -192,5 +218,8 @@
   body {
     @apply bg-background text-foreground;
     letter-spacing: var(--tracking-normal);
+  }
+  html {
+    @apply font-sans;
   }
 }

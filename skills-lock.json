@@ -1,0 +1,12 @@
+{
+  "version": 2,
+  "skills": {
+    "tauri-v2": {
+      "source": "nodnarbnitram/claude-code-extensions",
+      "commit": "35e7f7deae689e12b94f9c242b8f59efe0f66476",
+      "sourceType": "github",
+      "skillPath": ".claude/skills/tauri-v2/SKILL.md",
+      "computedHash": "785f2858f21d8d6757c136dded755da9ebb16d292391defcb7171e445c03e77d"
+    }
+  }
+}
