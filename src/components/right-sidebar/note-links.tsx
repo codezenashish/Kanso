@@ -1,83 +1,174 @@
-import { useState } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
+import { Tooltip } from '@base-ui/react/tooltip';
+import { Collapsible } from '@base-ui/react/collapsible';
 import { isTauri } from '@tauri-apps/api/core';
 import { openUrl } from '@tauri-apps/plugin-opener';
-import { ExternalLink, Link } from 'lucide-react';
-import type { readNoteMarkdown } from '@/lib/note-markdown';
+import { ChevronRight, ExternalLink, FileCode, FileText, FileType, Link2Off, Plus, type LucideIcon } from 'lucide-react';
+import type { NoteLink } from '@/lib/note-markdown';
+import type { WikiIndex } from '@/lib/wiki-index';
 import type { WorkspaceNode } from '@/lib/workspace-tree';
+import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
+import { groupNoteLinks, notePreviewText, type LinkedNote } from './link-sections';
 
 type NoteLinksProps = {
-  links: ReturnType<typeof readNoteMarkdown>['links'];
-  tree: WorkspaceNode[];
+  links: NoteLink[];
+  index: WikiIndex;
   noteId: string;
-  onOpenNote: (id: string) => void;
+  onOpenNote: (id: string, offset?: number) => void;
+  onFollow: (target: string) => void;
+  canCreate: (target: string) => boolean;
+  getNote: (id: string) => WorkspaceNode | undefined;
 };
 
-function listNotePaths(nodes: WorkspaceNode[], parentPath = ''): { id: string; path: string }[] {
-  return nodes.flatMap((node) => {
-    const path = `${parentPath}/${encodeURIComponent(node.name)}`;
-    return node.kind === 'file' ? [{ id: node.id, path }] : listNotePaths(node.children ?? [], path);
-  });
+const focusClass = 'focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-sidebar-ring';
+const rowClass = cn(
+  'flex w-full min-w-0 items-start gap-1.5 rounded-sm px-1.5 py-1.5 text-start hover:bg-sidebar-accent active:bg-sidebar-border aria-current:bg-sidebar-accent aria-current:text-sidebar-accent-foreground',
+  focusClass,
+);
+
+function LinkSection({ title, count, empty, children }: { title: string; count: number; empty: string; children: ReactNode }) {
+  return (
+    <section aria-label={title} className="border-b border-sidebar-border/70 pb-1 last:border-b-0">
+      <Collapsible.Root defaultOpen>
+        <h3>
+          <Collapsible.Trigger className={cn('group flex min-h-8 w-full cursor-pointer items-center gap-1 rounded-sm px-1 text-start text-xs font-medium hover:bg-sidebar-accent', focusClass)}>
+            <ChevronRight aria-hidden="true" className="size-3.5 shrink-0 motion-safe:transition-transform group-aria-expanded:rotate-90" />
+            <span className="min-w-0 flex-1">{title}</span>
+            <span className="px-1 text-muted-foreground tabular-nums">{count}</span>
+          </Collapsible.Trigger>
+        </h3>
+        <Collapsible.Panel>
+          {count ? <ul className="space-y-0.5">{children}</ul> : <p className="px-2 pt-0.5 pb-1 text-xs text-muted-foreground">{empty}</p>}
+        </Collapsible.Panel>
+      </Collapsible.Root>
+    </section>
+  );
 }
 
-function resolveLink(target: string, source: string) {
-  try {
-    return new URL(target, source);
-  } catch {
-    return undefined;
-  }
+function LinkLabel({ icon: Icon, name, detail, count }: { icon: LucideIcon; name: string; detail?: string; count: number }) {
+  return (
+    <>
+      <Icon aria-hidden="true" className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
+      <span className="min-w-0 flex-1">
+        <span className="block wrap-anywhere text-xs leading-4 font-medium">{name}</span>
+        {detail && detail !== name && <span className="block truncate text-[0.6875rem] leading-4 text-muted-foreground">{detail}</span>}
+      </span>
+      {count > 1 && <span className="shrink-0 rounded-sm bg-sidebar-accent px-1 text-[0.6875rem] leading-4 text-sidebar-accent-foreground tabular-nums">
+        <span aria-hidden="true">{count}</span><span className="sr-only">{count} references</span>
+      </span>}
+    </>
+  );
 }
 
-const linkClass = 'flex min-h-7 w-full cursor-pointer items-center gap-1.5 rounded-sm px-1.5 py-1 text-start hover:bg-sidebar-accent focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-sidebar-ring';
-
-export function NoteLinks({ links, tree, noteId, onOpenNote }: NoteLinksProps) {
-  const [failedTarget, setFailedTarget] = useState<string>();
-  if (!links.length) return <p className="text-sm text-muted-foreground">No links in this note.</p>;
-
-  const notes = listNotePaths(tree);
-  const workspaceOrigin = 'https://workspace.invalid';
-  const sourcePath = notes.find((note) => note.id === noteId)?.path ?? '/';
+function LinkedNoteRow({ entry, current, onOpenNote, getNote }: Pick<NoteLinksProps, 'onOpenNote' | 'getNote'> & {
+  entry: LinkedNote;
+  current: boolean;
+}) {
+  const { note, count, references } = entry;
+  const first = references?.[0];
+  const hasMultipleReferences = Boolean(references && references.length > 1);
+  const [referencesOpen, setReferencesOpen] = useState(false);
+  const [preview, setPreview] = useState('');
+  const yaml = /\.ya?ml$/i.test(note.path);
+  const markdown = !yaml && !/\.txt$/i.test(note.path);
 
   return (
-    <ul className="space-y-0.5 text-sm">
-      {links.map(({ label, target }) => {
-        const destination = resolveLink(target, workspaceOrigin + sourcePath);
-        const isExternal = destination && destination.origin !== workspaceOrigin
-          && (destination.protocol === 'https:' || destination.protocol === 'http:' || destination.protocol === 'mailto:');
-        const linkedNote = destination?.origin === workspaceOrigin && !target.startsWith('#')
-          ? notes.find((note) => note.path === destination.pathname || note.path === destination.pathname + '.md')
-          : undefined;
-
-        return (
-          <li key={target}>
-            {isExternal ? (
-              <a
-                href={destination.href}
-                target="_blank"
-                rel="noreferrer"
-                title={target}
-                className={linkClass}
-                onClick={(event) => {
-                  if (!isTauri()) return;
-                  event.preventDefault();
-                  setFailedTarget(undefined);
-                  void openUrl(destination.href).catch(() => setFailedTarget(target));
-                }}
-              >
-                <ExternalLink aria-hidden="true" className="size-3 shrink-0" />
-                <span className="min-w-0 wrap-anywhere">{label}</span>
-              </a>
-            ) : linkedNote ? (
-              <button type="button" className={linkClass} title={target} onClick={() => onOpenNote(linkedNote.id)}>
-                <Link aria-hidden="true" className="size-3 shrink-0" />
-                <span className="min-w-0 wrap-anywhere">{label}</span>
+    <li>
+      <Collapsible.Root open={referencesOpen} onOpenChange={setReferencesOpen}>
+        <div className="flex items-start gap-0.5">
+          <Tooltip.Root onOpenChange={(open) => {
+            if (!open) return;
+            const contextPreview = first ? notePreviewText(first.context, true) : '';
+            setPreview(contextPreview || notePreviewText(getNote(note.id)?.content ?? '', markdown));
+          }}>
+            <Tooltip.Trigger
+              type="button"
+              delay={350}
+              aria-current={current ? 'page' : undefined}
+              className={cn(rowClass, 'flex-1 cursor-pointer')}
+              onClick={() => onOpenNote(note.id, first?.offset)}
+            >
+              <LinkLabel icon={yaml ? FileCode : markdown ? FileText : FileType} name={note.name} detail={note.path} count={hasMultipleReferences ? 1 : count} />
+            </Tooltip.Trigger>
+            <Tooltip.Portal>
+              <Tooltip.Positioner side="left" align="start" sideOffset={8} className="z-40">
+                <Tooltip.Popup role="tooltip" className="w-56 max-w-[calc(100dvw-1rem)] rounded-lg border border-border bg-popover px-3 py-2 text-xs text-popover-foreground shadow-lg">
+                  <span className="block wrap-anywhere font-semibold">{note.name}</span>
+                  <span className="block wrap-anywhere text-muted-foreground">{note.path}</span>
+                  {preview && <p className="mt-1 wrap-anywhere leading-relaxed">{preview}</p>}
+                </Tooltip.Popup>
+              </Tooltip.Positioner>
+            </Tooltip.Portal>
+          </Tooltip.Root>
+          {hasMultipleReferences && (
+            <Collapsible.Trigger
+              aria-label={`${count} references in ${note.name}`}
+              className={cn('mt-1 flex min-h-6 cursor-pointer items-center gap-0.5 rounded-sm px-1 text-xs text-muted-foreground tabular-nums hover:bg-sidebar-accent aria-expanded:bg-sidebar-accent', focusClass)}
+            >
+              {count}<ChevronRight aria-hidden="true" className={cn('size-3', referencesOpen && 'rotate-90')} />
+            </Collapsible.Trigger>
+          )}
+        </div>
+        {hasMultipleReferences && (
+          <Collapsible.Panel className="ml-3 space-y-0.5 border-s border-sidebar-border ps-1">
+            {referencesOpen && references?.map(({ offset, context }, index) => (
+              <button key={offset} type="button" className={cn(rowClass, 'cursor-pointer text-xs text-muted-foreground')}
+                aria-label={`Jump to reference ${index + 1} in ${note.name}`}
+                onClick={() => onOpenNote(note.id, offset)}>
+                <span className="truncate">{notePreviewText(context, true) || `Reference ${index + 1}`}</span>
               </button>
-            ) : (
-              <span className="block wrap-anywhere px-1.5 py-1 text-muted-foreground" title={target}>{label}</span>
-            )}
-            {failedTarget === target && <p role="status" className="px-1.5 text-xs text-destructive">Could not open this link.</p>}
+            ))}
+          </Collapsible.Panel>
+        )}
+      </Collapsible.Root>
+    </li>
+  );
+}
+
+export function NoteLinks({ links, index, noteId, onOpenNote, onFollow, canCreate, getNote }: NoteLinksProps) {
+  const groups = useMemo(() => groupNoteLinks(index, noteId, links), [index, noteId, links]);
+  const [failedTarget, setFailedTarget] = useState<string>();
+  const renderNote = (entry: LinkedNote) => (
+    <LinkedNoteRow key={entry.note.id} entry={entry} current={entry.note.id === noteId} onOpenNote={onOpenNote} getNote={getNote} />
+  );
+
+  return (
+    <div className="space-y-1">
+      <LinkSection title="Outgoing Links" count={groups.outgoing.length} empty="No linked notes.">
+        {groups.outgoing.map(renderNote)}
+      </LinkSection>
+      <LinkSection title="Backlinks" count={groups.backlinks.length} empty="No notes link here.">
+        {groups.backlinks.map(renderNote)}
+      </LinkSection>
+      <LinkSection title="External Links" count={groups.external.length} empty="No external links.">
+        {groups.external.map(({ href, host, label, count }) => (
+          <li key={href}>
+            <a href={href} target="_blank" rel="noreferrer" title={href} className={rowClass} onClick={(event) => {
+              if (!isTauri()) return;
+              event.preventDefault();
+              setFailedTarget(undefined);
+              void openUrl(href).catch(() => setFailedTarget(href));
+            }}>
+              <LinkLabel icon={ExternalLink} name={label} detail={host} count={count} />
+            </a>
+            {failedTarget === href && <p role="status" className="px-1.5 text-xs text-destructive">Could not open this link.</p>}
           </li>
-        );
-      })}
-    </ul>
+        ))}
+      </LinkSection>
+      <LinkSection title="Unresolved Links" count={groups.unresolved.length} empty="No unresolved links.">
+        {groups.unresolved.map(({ target, name, detail, count, wiki }) => (
+          <li key={`${wiki}:${target}`} className="flex min-w-0 items-center gap-1 rounded-sm px-1.5 py-1.5 hover:bg-sidebar-accent">
+            <LinkLabel icon={Link2Off} name={name} detail={detail} count={count} />
+            {wiki && canCreate(target) && (
+              <Button type="button" variant="ghost" size="icon-xs" className={cn('shrink-0 cursor-pointer', focusClass)}
+                aria-label={`Create note ${name}`} title={`Create note ${name}`} onClick={() => onFollow(target)}>
+                <Plus aria-hidden="true" />
+              </Button>
+            )}
+          </li>
+        ))}
+      </LinkSection>
+    </div>
   );
 }

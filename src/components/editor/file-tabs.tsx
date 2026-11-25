@@ -16,11 +16,11 @@ export function FileTabs({ files, activeId, onSelect, onClose }: FileTabsProps) 
           key={file.id}
           className={cn(
             'flex h-9 max-w-55 shrink-0 items-center gap-1 rounded-md border px-1.5 text-sm',
-            activeId === file.id ? 'border-border bg-background text-foreground' : 'border-transparent text-muted-foreground',
+            activeId === file.id ? 'border-border bg-background text-foreground' : 'border-transparent text-muted-foreground hover:bg-accent hover:text-accent-foreground',
           )}
         >
           <button
-            className="flex h-full min-w-0 cursor-pointer items-center gap-1.5 rounded-sm px-1"
+            className="flex h-full min-w-0 cursor-pointer items-center gap-1.5 rounded-sm px-1 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
             aria-current={activeId === file.id}
             onClick={() => onSelect(file.id)}
           >
@@ -28,7 +28,7 @@ export function FileTabs({ files, activeId, onSelect, onClose }: FileTabsProps) 
             <span className="truncate">{file.name}</span>
           </button>
           <button
-            className="grid size-6 shrink-0 cursor-pointer place-items-center rounded-sm hover:bg-accent hover:text-accent-foreground"
+            className="grid size-6 shrink-0 cursor-pointer place-items-center rounded-sm focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring hover:bg-accent hover:text-accent-foreground"
             aria-label={`Close ${file.name}`}
             title={`Close ${file.name}`}
             onClick={() => onClose(file.id)}

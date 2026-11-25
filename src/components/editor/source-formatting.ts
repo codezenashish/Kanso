@@ -7,6 +7,7 @@ const inlineDelimiters = {
   underline: ['<u>', '</u>'],
   strike: ['~~', '~~'],
   inlineCode: ['`', '`'],
+  inlineMath: ['$', '$'],
 } as const;
 
 export function formatSource(
@@ -58,11 +59,13 @@ export function formatSource(
   const lines = value.slice(firstLine, lastLine).split('\n');
   const markdown = lines.join('\n');
 
-  if (action.type === 'codeBlock' || action.type === 'divider') {
+  if (action.type === 'codeBlock' || action.type === 'mathBlock' || action.type === 'divider') {
     const replacement = action.type === 'codeBlock'
       ? '```\n' + markdown + '\n```'
-      : markdown + (markdown ? '\n\n' : '') + '---\n\n';
-    const cursor = action.type === 'codeBlock' ? firstLine + 4 : firstLine + replacement.length;
+      : action.type === 'mathBlock'
+        ? '$$\n' + markdown + '\n$$'
+        : markdown + (markdown ? '\n\n' : '') + '---\n\n';
+    const cursor = action.type === 'codeBlock' ? firstLine + 4 : action.type === 'mathBlock' ? firstLine + 3 : firstLine + replacement.length;
     replace(firstLine, lastLine, replacement, cursor);
     return;
   }

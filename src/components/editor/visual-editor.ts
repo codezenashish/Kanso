@@ -6,10 +6,14 @@ import { history, redo, undo } from 'prosemirror-history';
 import { keymap } from 'prosemirror-keymap';
 import { Fragment } from 'prosemirror-model';
 import { liftListItem, sinkListItem, splitListItem, wrapInList } from 'prosemirror-schema-list';
-import { EditorState, Plugin, Selection, type Command } from 'prosemirror-state';
+import { EditorState, NodeSelection, Plugin, Selection, type Command } from 'prosemirror-state';
 import type { EditorView } from 'prosemirror-view';
+import { mathEditorMetaKey, mathVisualPlugin, type MathEditorIntent, type MathEditorSession } from './math-visual';
 import { slashCommandPlugin, type SlashMenuState } from './slash-menu';
 import type { MarkdownAction } from './toolbar/markdown-toolbar';
+import { wikiVisualPlugin, type WikiEditorActions } from './wiki-visual';
+import type { WikiMenu } from './wiki-suggestions';
+import { pasteVisualMarkdown } from './visual-paste';
 import { serializeVisualDocument, visualSchema, type VisualMarkdown } from './visual-markdown';
 
 const { nodes, marks } = visualSchema;
@@ -32,14 +36,23 @@ const advanceTableCell = chainCommands(goToNextCell(1), (state, dispatch) => (
   }))
 ));
 
-export function createVisualState(markdown: VisualMarkdown, publishSlashMenu: (menu: SlashMenuState | null) => void) {
+export function createVisualState(
+  markdown: VisualMarkdown,
+  publishSlashMenu: (menu: SlashMenuState | null) => void,
+  wikiActions: () => WikiEditorActions,
+  publishWikiMenu: (menu: WikiMenu | null) => void,
+  publishMathEditor: (session: MathEditorSession | null) => void,
+) {
   return EditorState.create({
     doc: markdown.document,
     plugins: [
       history(),
+      mathVisualPlugin(publishMathEditor),
+      wikiVisualPlugin(wikiActions, publishWikiMenu),
       slashCommandPlugin(publishSlashMenu, editorCommand),
       new Plugin({
         props: {
+          handlePaste: pasteVisualMarkdown,
           handleDOMEvents: {
             keydown(_view, event) {
               return event.target instanceof HTMLInputElement && event.target.type === 'checkbox';
@@ -67,6 +80,12 @@ export function createVisualState(markdown: VisualMarkdown, publishSlashMenu: (m
         'Mod-y': redo,
         'Mod-b': toggleBold,
         'Mod-i': toggleItalic,
+        Backspace: ({ selection }) => {
+          const { $from } = selection;
+          return selection.empty && $from.parentOffset === 0
+            && $from.pos === Selection.atStart($from.doc).from
+            && $from.doc.firstChild?.type === nodes.yaml_frontmatter;
+        },
         Enter: chainCommands(splitChecklistItem, splitListItem(nodes.list_item)),
         Tab: chainCommands(advanceTableCell, sinkListItem(nodes.list_item)),
         'Shift-Tab': chainCommands(goToNextCell(-1), liftListItem(nodes.list_item)),
@@ -124,12 +143,41 @@ function editorCommand(action: MarkdownAction): Command {
     case 'underline': return toggleMark(marks.underline);
     case 'strike': return toggleMark(marks.strike);
     case 'inlineCode': return toggleMark(marks.code);
+    case 'inlineMath':
+    case 'mathBlock':
+      return (state, dispatch) => {
+        const { selection } = state;
+        if (
+          selection instanceof NodeSelection
+          && (selection.node.type === nodes.inline_math || selection.node.type === nodes.math_block)
+        ) {
+          dispatch?.(state.tr.setMeta(mathEditorMetaKey, {
+            type: 'editNode',
+            pos: selection.from,
+          } satisfies MathEditorIntent));
+          return true;
+        }
+        const mode = action.type === 'mathBlock' ? 'block' : 'inline';
+        const initialLatex = selection.empty
+          ? ''
+          : state.doc.textBetween(selection.from, selection.to, mode === 'block' ? '\n' : ' ');
+        dispatch?.(state.tr.setMeta(mathEditorMetaKey, {
+          type: 'insert',
+          mode,
+          from: selection.from,
+          to: selection.to,
+          initialLatex,
+        } satisfies MathEditorIntent));
+        return true;
+      };
     case 'bulletList': return toggleList(nodes.bullet_list);
     case 'orderedList': return toggleList(nodes.ordered_list);
     case 'heading': return action.level
       ? setBlockType(nodes.heading, { level: action.level })
       : setBlockType(nodes.paragraph);
-    case 'codeBlock': return setBlockType(nodes.code_block);
+    case 'codeBlock': return (state, dispatch) => (
+      setBlockType(state.selection.$from.parent.type === nodes.code_block ? nodes.paragraph : nodes.code_block)(state, dispatch)
+    );
     case 'quote': return (state, dispatch) => (
       Array.from({ length: state.selection.$from.depth }, (_, index) => state.selection.$from.node(index + 1)).some((ancestor) => ancestor.type === nodes.blockquote)
         ? lift(state, dispatch)
@@ -146,7 +194,7 @@ function editorCommand(action: MarkdownAction): Command {
 }
 
 export function formatVisual(view: EditorView, action: MarkdownAction) {
-  view.focus();
+  if (action.type !== 'inlineMath' && action.type !== 'mathBlock') view.focus();
   if (action.type !== 'undo' && action.type !== 'redo' && selectionTouchesSourceBlock(view.state)) return;
   editorCommand(action)(view.state, view.dispatch, view);
 }

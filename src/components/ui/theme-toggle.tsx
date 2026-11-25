@@ -351,7 +351,7 @@ export function ThemeToggle({
           aria-haspopup="true"
           title={`Theme: ${theme.charAt(0).toUpperCase() + theme.slice(1)}`}
           className={cn(
-            "inline-flex items-center justify-center gap-1.5 rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs font-medium text-foreground shadow-2xs transition-colors duration-150 hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/50",
+            "inline-flex items-center justify-center gap-1.5 rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs font-medium text-card-foreground shadow-2xs transition-colors duration-150 hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/50",
             size === "xs" && "h-6 px-2 text-[11px]",
             size === "sm" && "h-7 px-2.5 text-xs",
             size === "default" && "h-8 px-3 text-sm"
@@ -364,7 +364,7 @@ export function ThemeToggle({
         </button>
 
         {dropdownOpen && (
-          <div className="absolute right-0 bottom-full mb-1 sm:bottom-auto sm:top-full sm:mt-1 z-50 min-w-32 rounded-lg border border-border bg-popover p-1 shadow-md animate-in fade-in-0 zoom-in-95">
+          <div className="absolute right-0 bottom-full mb-1 sm:bottom-auto sm:top-full sm:mt-1 z-50 min-w-32 rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-md animate-in fade-in-0 zoom-in-95">
             {THEME_OPTIONS.map((opt) => {
               const Icon = opt.icon;
               const isSelected = theme === opt.value;
@@ -377,9 +377,9 @@ export function ThemeToggle({
                     setDropdownOpen(false);
                   }}
                   className={cn(
-                    "w-full flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-xs transition-colors duration-150 select-none outline-none",
+                    "w-full flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-xs motion-safe:transition-colors duration-150 select-none outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
                     isSelected
-                      ? "bg-accent text-accent-foreground font-semibold"
+                      ? "bg-accent text-accent-foreground font-medium"
                       : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"
                   )}
                 >
@@ -419,13 +419,13 @@ export function ThemeToggle({
             aria-pressed={isSelected}
             aria-label={`Switch to ${opt.label} theme`}
             className={cn(
-              "relative flex items-center justify-center rounded-md text-xs transition-colors duration-150 outline-none select-none",
+              "relative flex items-center justify-center rounded-md text-xs motion-safe:transition-colors duration-150 outline-none select-none focus-visible:ring-2 focus-visible:ring-ring/50",
               size === "xs" && "size-6",
               size === "sm" && "size-7",
               size === "default" && "size-8",
               showLabel && "px-2 w-auto gap-1.5",
               isSelected
-                ? "bg-background text-foreground shadow-2xs font-semibold"
+                ? "bg-background text-foreground shadow-2xs font-medium"
                 : "text-muted-foreground hover:text-sidebar-foreground hover:bg-sidebar-accent/50"
             )}
           >

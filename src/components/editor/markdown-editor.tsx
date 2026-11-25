@@ -1,17 +1,22 @@
-import { useImperativeHandle, useLayoutEffect, useRef, useState, type Ref } from 'react';
+import { useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type Ref } from 'react';
 import { TextSelection, type EditorState } from 'prosemirror-state';
 import { EditorView as ProseMirrorView } from 'prosemirror-view';
-import 'prosemirror-view/style/prosemirror.css';
 import type { EditorView } from './editor-header';
+import { MathEditorPopover } from './math-editor-popover';
+import type { MathEditorSession } from './math-visual';
 import { SlashMenu, type SlashMenuState } from './slash-menu';
 import { formatSource } from './source-formatting';
 import { normalizeNewlines, originalSourceOffset, restoreSourceNewlines } from './source-newlines';
+import { emptyFormatting, prepareSourceFormatting, sourceFormatting, visualFormatting } from './toolbar/formatting-state';
 import { MarkdownToolbar, type MarkdownAction } from './toolbar/markdown-toolbar';
 import { copyVisualMarkdown, createVisualState, formatVisual } from './visual-editor';
+import { wikiInputContext, wikiSyntax } from '@/lib/wiki-markdown';
+import { filterWikiNotes, matchWikiInput, textareaCaret, WikiSuggestionMenu, wikiListId, type WikiMenu, type WikiSuggestion } from './wiki-suggestions';
+import type { WikiEditorActions } from './wiki-visual';
 import { readVisualMarkdown, translatePosition, writeVisualMarkdown, type VisualMarkdown } from './visual-markdown';
 
 export type MarkdownEditorHandle = {
-  navigateToHeading: (offset: number) => void;
+  navigateToOffset: (offset: number) => void;
   rememberSelection: () => void;
 };
 
@@ -19,7 +24,8 @@ type MarkdownEditorProps = {
   ref?: Ref<MarkdownEditorHandle>;
   value: string;
   view: EditorView;
-  isYaml: boolean;
+  sourceLabel?: string;
+  wiki: WikiEditorActions;
   onChange: (value: string) => void;
 };
 
@@ -55,34 +61,46 @@ function placeVisualSelection(view: ProseMirrorView, markdown: VisualMarkdown, s
   view.focus();
 }
 
-const visualEditorClass = [
-  'min-h-full wrap-anywhere text-base leading-[1.75] text-foreground outline-none',
-  '[&_h1]:font-heading [&_h1]:text-3xl [&_h2]:text-2xl [&_h3]:text-xl [&_h4]:text-lg',
-  '[&_h1]:font-semibold [&_h2]:font-semibold [&_h3]:font-semibold [&_h4]:font-semibold [&_h5]:font-semibold [&_h6]:font-semibold',
-  '[&>*+*]:mt-3 [&_a]:text-primary [&_a]:underline [&_ul]:list-disc [&_ol]:list-decimal',
-  '[&_blockquote]:rounded-e-md [&_blockquote]:border-s-2 [&_blockquote]:border-primary/45 [&_blockquote]:bg-muted/35 [&_blockquote]:px-4 [&_blockquote]:py-2 [&_blockquote>*+*]:mt-2',
-  '[&_pre]:font-mono [&_pre]:overflow-auto [&_pre]:rounded-md [&_pre]:bg-muted [&_pre]:p-4',
-  '[&_table]:w-full [&_table]:table-fixed [&_table]:border-collapse [&_th]:bg-muted/65 [&_th]:text-start [&_th]:font-medium',
-  '[&_:is(td,th)]:relative [&_:is(td,th)]:border [&_:is(td,th)]:border-border [&_:is(td,th)]:px-3 [&_:is(td,th)]:py-1.5 [&_:is(td,th)]:align-top',
-  '[&_.selectedCell]:bg-accent [&_.selectedCell]:outline [&_.selectedCell]:-outline-offset-1 [&_.selectedCell]:outline-ring/40',
-  '[&_hr]:border-border',
-  '[&_code]:rounded-sm [&_code]:bg-muted [&_code]:px-1 [&_code]:font-mono [&_pre_code]:p-0',
-].join(' ');
+export function MarkdownEditor({ ref, value, view, sourceLabel, wiki, onChange }: MarkdownEditorProps) {
+  const [visualFormats, setVisualFormats] = useState(emptyFormatting);
+  const [sourceRange, setSourceRange] = useState({ start: 0, end: 0 });
+  const sourceDocument = useMemo(
+    () => view === 'source' && !sourceLabel ? prepareSourceFormatting(normalizeNewlines(value)) : null,
+    [value, view, sourceLabel],
+  );
+  const formats = useMemo(() => view === 'document' ? visualFormats
+    : sourceDocument ? sourceFormatting(sourceDocument, sourceRange.start, sourceRange.end) : emptyFormatting,
+  [view, visualFormats, sourceDocument, sourceRange]);
 
-export function MarkdownEditor({ ref, value, view, isYaml, onChange }: MarkdownEditorProps) {
+  function recordSourceSelection(source: HTMLTextAreaElement) {
+    const { selectionStart: start, selectionEnd: end } = source;
+    setSourceRange((previous) => previous.start === start && previous.end === end ? previous : { start, end });
+  }
+
+  function recordVisualSelection(state: EditorState) {
+    const next = visualFormatting(state);
+    setVisualFormats((previous) => previous.heading === next.heading && previous.link === next.link
+      && JSON.stringify(previous.toggles) === JSON.stringify(next.toggles) ? previous : next);
+  }
+
+  const [wikiMenu, setWikiMenu] = useState<WikiMenu | null>(null);
+  const sourceMenu = useRef({ signature: '', dismissed: '', selected: 0 });
   const [slashMenu, setSlashMenu] = useState<SlashMenuState | null>(null);
+  const [mathEditor, setMathEditor] = useState<MathEditorSession | null>(null);
   const sourceRef = useRef<HTMLTextAreaElement>(null);
   const visualHostRef = useRef<HTMLDivElement>(null);
   const visualViewRef = useRef<ProseMirrorView>(null);
   const visualSessionRef = useRef<VisualSession>(null);
   const pendingSelectionRef = useRef<SourceSelection>(null);
-  const documentRef = useRef({ value, onChange });
+  const documentRef = useRef({ value, onChange, wiki });
 
   useLayoutEffect(() => {
-    documentRef.current = { value, onChange };
-  }, [value, onChange]);
+    documentRef.current = { value, onChange, wiki };
+  }, [value, onChange, wiki]);
 
   useLayoutEffect(() => {
+    setWikiMenu(null);
+    setMathEditor(null);
     const selection = pendingSelectionRef.current;
     pendingSelectionRef.current = null;
     if (view === 'source') {
@@ -96,7 +114,11 @@ export function MarkdownEditor({ ref, value, view, isYaml, onChange }: MarkdownE
     let session = visualSessionRef.current;
     if (!session || session.content !== markdownContent) {
       const markdown = readVisualMarkdown(markdownContent);
-      session = { markdown, state: createVisualState(markdown, setSlashMenu), content: markdownContent };
+      session = {
+        markdown,
+        state: createVisualState(markdown, setSlashMenu, () => documentRef.current.wiki, setWikiMenu, setMathEditor),
+        content: markdownContent,
+      };
       visualSessionRef.current = session;
     }
     const activeSession = session;
@@ -107,13 +129,14 @@ export function MarkdownEditor({ ref, value, view, isYaml, onChange }: MarkdownE
         role: 'textbox',
         'aria-label': 'Visual Markdown editor',
         'aria-multiline': 'true',
-        class: visualEditorClass,
+        class: 'visual-markdown editor-text',
         spellcheck: 'false',
       },
       clipboardTextSerializer: (slice) => copyVisualMarkdown(slice.content),
       dispatchTransaction(transaction) {
         const { state: nextState, transactions } = editor.state.applyTransaction(transaction);
         editor.updateState(nextState);
+        recordVisualSelection(nextState);
         activeSession.state = nextState;
         if (transactions.some((applied) => applied.docChanged)) {
           const { content } = writeVisualMarkdown(activeSession.markdown, nextState.doc);
@@ -125,11 +148,46 @@ export function MarkdownEditor({ ref, value, view, isYaml, onChange }: MarkdownE
       },
     });
     visualViewRef.current = editor;
+    recordVisualSelection(editor.state);
     if (selection) placeVisualSelection(editor, activeSession.markdown, selection);
     return () => {
       visualViewRef.current = null;
       editor.destroy();
     };
+  }, [view]);
+
+  useLayoutEffect(() => {
+    const editor = visualViewRef.current;
+    const session = visualSessionRef.current;
+    if (!editor || !session || session.content === value) return;
+    const markdown = readVisualMarkdown(value);
+    const current = editor.state.doc.content;
+    const next = markdown.document.content;
+    const start = current.findDiffStart(next);
+    session.markdown = markdown;
+    session.content = value;
+    if (start !== null) {
+      const end = current.findDiffEnd(next)!;
+      const overlap = start - Math.min(end.a, end.b);
+      const transaction = editor.state.tr.replace(start, end.a + Math.max(0, overlap),
+        markdown.document.slice(start, end.b + Math.max(0, overlap))).setMeta('addToHistory', false);
+      session.state = editor.state.apply(transaction);
+      editor.updateState(session.state);
+      recordVisualSelection(session.state);
+    }
+  }, [value, view]);
+
+  useLayoutEffect(() => {
+    if (view === 'source' && sourceRef.current) recordSourceSelection(sourceRef.current);
+  }, [view, value]);
+
+  useLayoutEffect(() => {
+    const source = sourceRef.current;
+    if (view !== 'source' || !source) return;
+    // Native selection events also cover programmatic cursor changes.
+    const sync = () => recordSourceSelection(source);
+    source.addEventListener('select', sync);
+    return () => source.removeEventListener('select', sync);
   }, [view]);
 
   useImperativeHandle(ref, () => ({
@@ -153,12 +211,15 @@ export function MarkdownEditor({ ref, value, view, isYaml, onChange }: MarkdownE
         };
       }
     },
-    navigateToHeading(offset) {
+    navigateToOffset(offset) {
       const selection = { start: offset, end: offset };
       const editor = visualViewRef.current;
       const session = visualSessionRef.current;
       if (editor && session) placeVisualSelection(editor, session.markdown, selection);
-      else if (sourceRef.current) placeSourceSelection(sourceRef.current, selection, value);
+      else if (sourceRef.current) {
+        placeSourceSelection(sourceRef.current, selection, value);
+        recordSourceSelection(sourceRef.current);
+      }
     },
   }), [value]);
 
@@ -171,32 +232,107 @@ export function MarkdownEditor({ ref, value, view, isYaml, onChange }: MarkdownE
     onChange(restoreSourceNewlines(value, content));
   }
 
+  function syncSourceWiki(source: HTMLTextAreaElement) {
+    if (sourceLabel || source.selectionStart !== source.selectionEnd || document.activeElement !== source) {
+      setWikiMenu(null);
+      return;
+    }
+    const cursor = source.selectionStart;
+    const line = source.value.lastIndexOf('\n', cursor - 1);
+    const match = matchWikiInput(source.value.slice(line + 1, cursor), cursor, source.value.slice(cursor));
+    const state = sourceMenu.current;
+    const context = match && wikiInputContext(source.value, match.from);
+    if (!match || !context) {
+      state.dismissed = '';
+      setWikiMenu(null);
+      return;
+    }
+    const signature = `${match.from}:${match.query}:${match.alias ?? ''}`;
+    if (state.dismissed === signature) return;
+    if (state.signature !== signature) state.selected = 0;
+    state.signature = signature;
+    const results = filterWikiNotes(wiki.suggestions, match.query);
+    state.selected = Math.min(state.selected, Math.max(0, results.length - 1));
+    const caret = textareaCaret(source, cursor);
+    setWikiMenu({
+      results, selected: state.selected, left: caret.left, top: caret.top, bottom: caret.bottom,
+      choose(note: WikiSuggestion) {
+        const syntax = wikiSyntax(note.target, match.alias?.trim() || null, context.inTable);
+        source.focus();
+        source.setSelectionRange(match.from, match.to);
+        if (!source.ownerDocument.execCommand('insertText', false, syntax)) {
+          source.setRangeText(syntax, match.from, match.to, 'end');
+          changeSource(source.value);
+        }
+        setWikiMenu(null);
+      },
+    });
+  }
+
   function applyFormatting(action: MarkdownAction) {
     if (visualViewRef.current) formatVisual(visualViewRef.current, action);
-    else if (sourceRef.current) formatSource(sourceRef.current, action, changeSource);
+    else if (sourceRef.current) {
+      formatSource(sourceRef.current, action, changeSource);
+      recordSourceSelection(sourceRef.current);
+    }
   }
 
   return (
     <>
-      {!isYaml && <MarkdownToolbar key={view} onAction={applyFormatting} onReturnFocus={focusEditor} />}
+      {!sourceLabel && <MarkdownToolbar key={view} formats={formats} onAction={applyFormatting} onReturnFocus={focusEditor} />}
       <textarea
         ref={sourceRef}
         hidden={view !== 'source'}
-        aria-label={isYaml ? 'YAML source' : 'Markdown source'}
-        className="min-h-0 w-full flex-1 resize-none bg-background font-sans text-base leading-[1.75] text-foreground focus-visible:outline-2 focus-visible:outline-ring/50"
+        aria-label={sourceLabel ?? 'Markdown source'}
+        className="min-h-0 w-full flex-1 resize-none bg-background bg-local editor-text focus-visible:outline-2 focus-visible:outline-ring/50"
         spellCheck={false}
         value={normalizeNewlines(value)}
-        onChange={(event) => changeSource(event.target.value)}
+        aria-controls={view === 'source' && wikiMenu ? wikiListId : undefined}
+        aria-activedescendant={view === 'source' && wikiMenu?.results.length ? `${wikiListId}-${wikiMenu.selected}` : undefined}
+        onChange={(event) => {
+          changeSource(event.target.value);
+          recordSourceSelection(event.currentTarget);
+          syncSourceWiki(event.currentTarget);
+        }}
+        onSelect={(event) => {
+          recordSourceSelection(event.currentTarget);
+          syncSourceWiki(event.currentTarget);
+        }}
+        onScroll={(event) => { if (wikiMenu) syncSourceWiki(event.currentTarget); }}
+        onBlur={() => { if (view === 'source') setWikiMenu(null); }}
         onKeyDown={(event) => {
-          if (isYaml || !(event.metaKey || event.ctrlKey) || event.altKey) return;
+          if (wikiMenu && !event.nativeEvent.isComposing) {
+            const state = sourceMenu.current;
+            if (event.key === 'Escape') {
+              event.preventDefault();
+              state.dismissed = state.signature;
+              setWikiMenu(null);
+              return;
+            }
+            const count = wikiMenu.results.length;
+            if (count && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
+              event.preventDefault();
+              state.selected = (state.selected + count + (event.key === 'ArrowDown' ? 1 : -1)) % count;
+              syncSourceWiki(event.currentTarget);
+              return;
+            }
+            if (count && event.key === 'Enter') {
+              event.preventDefault();
+              wikiMenu.choose(wikiMenu.results[state.selected]);
+              return;
+            }
+          }
+          if (sourceLabel || !(event.metaKey || event.ctrlKey) || event.altKey) return;
           const key = event.key.toLowerCase();
           if (key !== 'b' && key !== 'i') return;
           event.preventDefault();
           applyFormatting({ type: key === 'b' ? 'bold' : 'italic' });
         }}
       />
-      {view === 'document' && <div ref={visualHostRef} className="min-h-0 flex-1 overflow-auto" />}
+      {view === 'document' && <div ref={visualHostRef} className="min-h-0 flex-1 overflow-auto bg-background bg-local" />}
+      {wikiMenu && <WikiSuggestionMenu menu={wikiMenu} />}
       {view === 'document' && slashMenu && <SlashMenu menu={slashMenu} />}
+      {view === 'document' && <MathEditorPopover session={mathEditor} />}
     </>
   );
 }

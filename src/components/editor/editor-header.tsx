@@ -1,3 +1,4 @@
+import type { Ref } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { Braces, FileText, Minus, PanelLeftOpen, PanelRight, Square, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -18,6 +19,7 @@ type EditorHeaderProps = {
   workspaceSaved: boolean;
   view: EditorView;
   rightSidebarOpen: boolean;
+  rightSidebarToggleRef?: Ref<HTMLButtonElement>;
   sourceOnly: boolean;
   onSelectFile: (id: string) => void;
   onCloseFile: (id: string) => void;
@@ -35,20 +37,41 @@ async function runWindowAction(action: (typeof windowActions)[number][0]) {
 }
 
 export function EditorHeader({
-  files, activeId, workspaceSaved, view, rightSidebarOpen, sourceOnly, onSelectFile, onCloseFile, onChangeView, onToggleRightSidebar, onOpenExplorer,
+  files,
+  activeId,
+  workspaceSaved,
+  view,
+  rightSidebarOpen,
+  rightSidebarToggleRef,
+  sourceOnly,
+  onSelectFile,
+  onCloseFile,
+  onChangeView,
+  onToggleRightSidebar,
+  onOpenExplorer,
 }: EditorHeaderProps) {
   const documentMode = view === 'document';
   const modeUnavailableReason = !activeId
     ? 'Open a note to switch editor modes'
-    : sourceOnly ? 'YAML files use Source mode' : undefined;
+    : sourceOnly
+      ? 'YAML files use Source mode'
+      : undefined;
 
   return (
-    <header className="relative z-10 flex h-13 shrink-0 items-center gap-2 border-b border-border bg-background px-2 sm:px-4">
-      <Button variant="ghost" size="icon-sm" className="sm:hidden" aria-label="Show explorer" onClick={onOpenExplorer}>
+    <header className="relative z-10 flex h-13 shrink-0 items-center gap-2 border-b border-border bg-sidebar px-2 text-sidebar-foreground sm:px-4">
+      <Button
+        variant="ghost"
+        size="icon-sm"
+        className="sm:hidden"
+        aria-label="Show explorer"
+        onClick={onOpenExplorer}
+      >
         <PanelLeftOpen />
       </Button>
       <FileTabs files={files} activeId={activeId} onSelect={onSelectFile} onClose={onCloseFile} />
-      <span className="hidden shrink-0 text-xs text-muted-foreground lg:inline">{workspaceSaved ? 'Saved locally' : 'Workspace notice'}</span>
+      <span className="hidden shrink-0 text-xs text-muted-foreground lg:inline">
+        {workspaceSaved ? 'Saved locally' : 'Workspace notice'}
+      </span>
       <div className="flex shrink-0 items-center gap-0.5">
         <Button
           variant="ghost"
@@ -57,8 +80,11 @@ export function EditorHeader({
           aria-pressed={documentMode}
           aria-disabled={Boolean(modeUnavailableReason)}
           aria-controls={activeId ? 'editor-workspace' : undefined}
-          title={modeUnavailableReason ?? (documentMode ? 'Document mode · Switch to Source' : 'Source mode · Switch to Document')}
-          className="cursor-pointer border-border bg-secondary text-secondary-foreground aria-disabled:cursor-default aria-disabled:opacity-50"
+          title={
+            modeUnavailableReason ??
+            (documentMode ? 'Document mode · Switch to Source' : 'Source mode · Switch to Document')
+          }
+          className="cursor-pointer border-border text-sidebar-foreground aria-pressed:bg-accent aria-pressed:text-accent-foreground aria-disabled:cursor-default aria-disabled:opacity-50"
           onClick={() => {
             if (!modeUnavailableReason) onChangeView(documentMode ? 'source' : 'document');
           }}
@@ -68,6 +94,7 @@ export function EditorHeader({
         <Button
           variant="ghost"
           size="icon-sm"
+          ref={rightSidebarToggleRef}
           title="Toggle right sidebar"
           aria-label="Toggle right sidebar"
           aria-controls="right-sidebar"
@@ -85,7 +112,10 @@ export function EditorHeader({
             size="icon-sm"
             title={label}
             aria-label={label}
-            className={cn('text-muted-foreground', action === 'close' && 'hover:bg-destructive hover:text-destructive-foreground')}
+            className={cn(
+              'text-muted-foreground',
+              action === 'close' && 'hover:bg-destructive hover:text-destructive-foreground',
+            )}
             onClick={() => void runWindowAction(action)}
           >
             <Icon />

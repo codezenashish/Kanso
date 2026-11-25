@@ -2,6 +2,7 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 @import "@fontsource-variable/geist";
+@import "prosemirror-view/style/prosemirror.css" layer(components);
 @custom-variant dark (&:is(.dark *));
 
 :root {
@@ -37,9 +38,9 @@
   --sidebar-accent-foreground: oklch(0.3012 0 0);
   --sidebar-border: oklch(0.8434 0.0231 87.1621);
   --sidebar-ring: oklch(0.3012 0 0);
-  --font-sans: "Inter", sans-serif;
+  --font-sans: "Geist Variable", system-ui, sans-serif;
   --font-serif: "Playfair Display", serif;
-  --font-mono: "JetBrains Mono", monospace;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
   --radius: 0.5rem;
   --shadow-x: 0px;
   --shadow-y: 4px;
@@ -92,9 +93,6 @@
   --sidebar-accent-foreground: oklch(0.8520 0.0205 100.6306);
   --sidebar-border: oklch(0.2931 0 0);
   --sidebar-ring: oklch(0.8520 0.0205 100.6306);
-  --font-sans: "Inter", sans-serif;
-  --font-serif: "Playfair Display", serif;
-  --font-mono: "JetBrains Mono", monospace;
   --radius: 0.5rem;
   --shadow-x: 0px;
   --shadow-y: 6px;
@@ -172,42 +170,147 @@
   --tracking-widest: calc(var(--tracking-normal) + 0.1em);
 }
 @layer components {
-  .ProseMirror :is(ul, ol) {
-    @apply ps-5;
+  .editor-text {
+    @apply font-sans text-base leading-[1.65] font-normal text-foreground;
   }
 
-  .ProseMirror :is(ul, ol):has(> [data-task]):not(:has(> li:not([data-task]))) {
-    @apply ps-0;
+  .visual-markdown {
+    @apply min-h-full bg-background wrap-anywhere outline-none;
   }
 
-  .ProseMirror [data-task] {
-    @apply grid grid-cols-[auto_minmax(0,1fr)] items-start gap-2 py-0.5;
+  .visual-markdown:focus-visible {
+    @apply outline-2 -outline-offset-2 outline-ring/50;
   }
 
-  .ProseMirror [data-task="true"] > [data-task-content] > p:first-child {
+  .visual-markdown > :not([hidden]) ~ :not([hidden]) {
+    @apply mt-3;
+  }
+
+  .visual-markdown :is(h1, h2, h3, h4, h5, h6) {
+    @apply leading-tight font-semibold tracking-tight;
+  }
+
+  .visual-markdown > :not([hidden]) ~ :is(h1, h2, h3, h4, h5, h6) {
+    @apply mt-6;
+  }
+
+  .visual-markdown h1 { @apply text-3xl; }
+  .visual-markdown h2 { @apply text-2xl; }
+  .visual-markdown h3 { @apply text-xl; }
+  .visual-markdown h4 { @apply text-lg; }
+  .visual-markdown h5 { @apply text-base font-semibold; }
+  .visual-markdown h6 { @apply text-sm font-medium; }
+  .visual-markdown strong { @apply font-bold; }
+  .visual-markdown :is(a, [data-wiki-target]) { @apply text-primary underline underline-offset-2; }
+  .visual-markdown [data-wiki-target] { @apply cursor-pointer rounded-sm hover:bg-accent active:bg-muted focus-visible:outline-2 focus-visible:outline-ring; }
+
+  .visual-markdown :is(ul, ol) { @apply ps-6; }
+  .visual-markdown ul { @apply list-disc; }
+  .visual-markdown ul ul { @apply list-[circle]; }
+  .visual-markdown ul ul ul { @apply list-[square]; }
+  .visual-markdown ol { @apply list-decimal; }
+  .visual-markdown li + li { @apply mt-1; }
+  .visual-markdown :is(li, [data-task-content], blockquote) > :not(:first-child) { @apply mt-2; }
+  .visual-markdown :is(li, [data-task-content]) > :is(ul, ol):not(:first-child) { @apply mt-1; }
+  .visual-markdown :is(ul, ol):has(> [data-task]):not(:has(> li:not([data-task]))) > [data-task] {
+    @apply -ms-6;
+  }
+
+  .visual-markdown [data-task] {
+    @apply grid grid-cols-[auto_minmax(0,1fr)] items-start gap-2;
+  }
+
+  .visual-markdown [data-task="true"] > [data-task-content] > p:first-child {
     @apply text-muted-foreground line-through;
   }
 
-  .ProseMirror [data-task-content] > p:has(> .ProseMirror-trailingBreak:only-child) {
+  .visual-markdown [data-task-content] > p:has(> .ProseMirror-trailingBreak:only-child) {
     @apply relative;
   }
 
-  .ProseMirror [data-task-content] > p:has(> .ProseMirror-trailingBreak:only-child)::before {
+  .visual-markdown [data-task-content] > p:has(> .ProseMirror-trailingBreak:only-child)::before {
     content: 'Add a task';
-    @apply pointer-events-none absolute text-muted-foreground/80;
+    @apply pointer-events-none absolute text-muted-foreground;
+  }
+
+  .visual-markdown blockquote {
+    @apply rounded-e-md border-s-2 border-border bg-sidebar text-sidebar-foreground px-4 py-2;
+  }
+  .visual-markdown pre { @apply max-w-full overflow-x-auto rounded-md bg-sidebar p-4 font-mono text-sm leading-relaxed font-normal whitespace-pre text-sidebar-foreground; }
+  .visual-markdown code { @apply rounded-sm bg-sidebar px-1 font-mono text-[0.9em] text-sidebar-foreground; }
+  .visual-markdown pre code { @apply bg-transparent p-0 text-inherit; }
+  .visual-markdown hr { @apply border-border; }
+
+  .visual-markdown table { @apply w-full table-fixed border-collapse; }
+  .visual-markdown th { @apply bg-sidebar text-start font-medium text-sidebar-foreground; }
+  .visual-markdown :is(td, th) { @apply relative wrap-anywhere border border-border px-3 py-1.5 text-start align-top; }
+  .visual-markdown .ProseMirror-selectednode { @apply outline-2 outline-ring; }
+  .visual-markdown li.ProseMirror-selectednode { @apply outline-none; }
+  .visual-markdown li.ProseMirror-selectednode::after { @apply start-[-1.5rem] end-[-2px] border-ring; }
+
+  .visual-markdown .selectedCell { @apply bg-accent outline -outline-offset-1 outline-ring/40; }
+
+  .katex * {
+    border-color: currentColor;
+  }
+
+  .visual-markdown .math-inline-node {
+    @apply mx-0.5 inline cursor-pointer rounded-sm px-1 py-0.5 align-baseline text-foreground motion-safe:transition-colors hover:bg-accent/70;
+  }
+
+  .visual-markdown .math-inline-node.ProseMirror-selectednode,
+  .visual-markdown .math-inline-node[data-math-editing="true"] {
+    @apply bg-accent outline-2 outline-ring/70;
+  }
+
+  .visual-markdown .math-inline-node .katex {
+    font-size: 1.05em;
+  }
+
+  .visual-markdown .math-block-node {
+    @apply relative cursor-pointer overflow-x-auto rounded-lg border border-transparent bg-card/50 px-4 py-3 text-center text-foreground motion-safe:transition-colors hover:border-border hover:bg-card;
+  }
+
+  .visual-markdown .math-block-node.ProseMirror-selectednode,
+  .visual-markdown .math-block-node[data-math-editing="true"] {
+    @apply border-ring/60 bg-card outline-2 outline-ring/40;
+  }
+
+  .visual-markdown .math-block-node .katex-display {
+    @apply my-0;
+  }
+
+  .visual-markdown .math-empty {
+    @apply font-mono text-sm text-muted-foreground italic;
+  }
+
+  .visual-markdown .math-error {
+    @apply inline-flex max-w-full flex-col items-start gap-1 rounded-sm border border-destructive/35 bg-destructive/10 px-1.5 py-0.5 text-start font-mono text-[0.85em] text-destructive;
+  }
+
+  .visual-markdown .math-block-node .math-error {
+    @apply flex w-full rounded-md px-3 py-2 text-xs;
+  }
+
+  .visual-markdown .math-error-source {
+    @apply break-all;
+  }
+
+  .visual-markdown .math-error-detail {
+    @apply text-[0.75rem] leading-snug opacity-85;
   }
 
   .heading {
-    @apply text-2xl md:text-3xl lg:text-4xl font-bold text-foreground;
+    @apply text-xl leading-tight font-semibold tracking-tight text-foreground;
   }
   .subheading {
-    @apply text-base sm:text-lg font-semibold tracking-tight text-foreground;
+    @apply text-sm leading-snug font-medium text-foreground;
   }
   .body-text {
-    @apply text-sm md:text-base lg:text-lg text-foreground/80 dark:text-foreground/85;
+    @apply text-sm leading-relaxed font-normal text-foreground;
   }
   .small-text {
-    @apply text-xs md:text-sm lg:text-base text-muted-foreground;
+    @apply text-xs leading-relaxed font-normal text-muted-foreground;
   }
 }
 
@@ -215,11 +318,15 @@
   * {
     @apply border-border outline-ring/50;
   }
-  body {
-    @apply bg-background text-foreground;
-    letter-spacing: var(--tracking-normal);
-  }
   html {
+    color-scheme: light;
     @apply font-sans;
+  }
+  .dark {
+    color-scheme: dark;
+  }
+  body {
+    @apply bg-background font-normal text-foreground;
+    letter-spacing: var(--tracking-normal);
   }
 }

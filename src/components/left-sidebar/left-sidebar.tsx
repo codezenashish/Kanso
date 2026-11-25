@@ -108,22 +108,22 @@ export function LeftSidebar({ workspace, mobileOpen, collapsed, onCollapse, onRe
       )}
       style={{ width }}
     >
-      <div className="mb-2 flex h-8 shrink-0 items-center gap-2 px-1 text-sm font-semibold">
-        <span className="grid size-6 place-items-center rounded-md bg-sidebar-foreground font-serif text-sidebar italic">k</span>
+      <div className="mb-2 flex h-8 shrink-0 items-center gap-2 px-1 text-sm font-medium">
+        <span className="grid size-6 place-items-center rounded-md bg-sidebar-primary font-serif text-sidebar-primary-foreground italic">k</span>
         Kanso
         <Button variant="ghost" size="icon-sm" className="ml-auto" title="Collapse sidebar" aria-label="Collapse sidebar" onClick={onCollapse}>
           <PanelLeftClose />
         </Button>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        <label className="mb-2 flex h-8 items-center gap-2 rounded-md border border-sidebar-border bg-background/40 px-2 text-muted-foreground focus-within:border-sidebar-ring">
+      <div className="min-h-0 flex-1 overflow-y-auto bg-sidebar bg-local">
+        <label className="mb-2 flex h-8 items-center gap-2 rounded-md border border-input bg-background px-2 text-muted-foreground focus-within:border-sidebar-ring">
           <Search aria-hidden="true" className="size-4 shrink-0" />
           <input
             ref={searchRef}
             aria-label="Search notes"
             placeholder="Search"
             type="search"
-            className="min-w-0 flex-1 bg-transparent text-sm text-sidebar-foreground outline-none placeholder:text-muted-foreground"
+            className="min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             onKeyDown={(event) => {

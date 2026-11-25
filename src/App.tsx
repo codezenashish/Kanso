@@ -1,13 +1,15 @@
-import { useEffect, useEffectEvent, useRef, useState } from 'react';
+import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from 'react';
 import { PanelLeftOpen } from 'lucide-react';
 import { EditorHeader, EditorWorkspace, type EditorView, type EditorWorkspaceHandle } from '@/components/editor';
 import { LeftSidebar } from '@/components/left-sidebar';
 import { RightSidebar } from '@/components/right-sidebar';
 import { Button } from '@/components/ui/button';
+import { find } from '@/lib/workspace-tree';
 import { useWorkspace } from '@/hooks/use-workspace';
 
 export default function App() {
   const workspace = useWorkspace();
+  const rightSidebarToggleRef = useRef<HTMLButtonElement>(null);
   const editorWorkspaceRef = useRef<EditorWorkspaceHandle>(null);
   const [view, setView] = useState<EditorView>(() => {
     try {
@@ -16,11 +18,24 @@ export default function App() {
       return 'source';
     }
   });
-  const sourceOnly = /\.ya?ml$/i.test(workspace.activeNode?.name ?? '');
+  const sourceOnly = /\.(?:txt|ya?ml)$/i.test(workspace.activeNode?.name ?? '');
   const editorView = sourceOnly ? 'source' : view;
   const [rightSidebarOpen, setRightSidebarOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+
+  const [linkJump, setLinkJump] = useState<{ id: string; offset: number } | null>(null);
+
+  function openLinkedNote(id: string, offset?: number) {
+    workspace.openFile(id);
+    setLinkJump(offset === undefined ? null : { id, offset });
+  }
+
+  useLayoutEffect(() => {
+    if (!linkJump || workspace.activeNode?.id !== linkJump.id) return;
+    editorWorkspaceRef.current?.navigateToOffset(linkJump.offset);
+    setLinkJump(null);
+  }, [linkJump, workspace.activeNode?.id]);
 
   function createNote() {
     if (window.matchMedia('(width < 40rem)').matches) setMobileOpen(true);
@@ -51,7 +66,7 @@ export default function App() {
   }, []);
 
   return (
-    <div className="relative flex h-dvh w-full min-w-0 gap-1.5 overflow-hidden bg-muted p-1.5 font-sans text-foreground sm:gap-1 sm:p-1">
+    <div inert={workspace.loading} className="relative flex h-dvh w-full min-w-0 gap-1.5 overflow-hidden bg-background p-1.5 font-sans text-foreground sm:gap-1 sm:p-1">
       {collapsed && (
         <Button
           variant="ghost"
@@ -85,6 +100,7 @@ export default function App() {
           view={editorView}
           sourceOnly={sourceOnly}
           rightSidebarOpen={rightSidebarOpen}
+          rightSidebarToggleRef={rightSidebarToggleRef}
           onSelectFile={workspace.openFile}
           onCloseFile={workspace.closeFile}
           onChangeView={(nextView) => {
@@ -96,17 +112,18 @@ export default function App() {
           onOpenExplorer={() => setMobileOpen(true)}
         />
         {(workspace.recoverySnapshot !== null || workspace.saveStatus !== 'saved') && (
-          <div className="shrink-0 border-b border-border bg-muted px-3 py-2 text-sm text-foreground">
+          <div className="shrink-0 border-b border-border bg-sidebar px-3 py-2 text-sm text-sidebar-foreground">
             <p role="status">
               {workspace.saveStatus === 'failed' && 'Changes could not be saved. Keep Kanso open and retry or download a copy.'}
               {workspace.saveStatus === 'conflict' && 'The saved workspace changed elsewhere. Download this copy before reopening Kanso.'}
-              {workspace.saveStatus === 'unavailable' && 'Workspace storage is unavailable. Download any changes before closing Kanso.'}
+              {workspace.saveStatus === 'unavailable' && 'Workspace storage is unavailable. Retry opening the workspace.'}
               {workspace.saveStatus === 'saved' && workspace.recoverySnapshot !== null
-                && 'The saved workspace could not be read. A fresh workspace is open, and you can download the original data.'}
+                && 'Legacy workspace data remains available to download.'}
             </p>
             <div className="mt-1 flex flex-wrap gap-1">
               {workspace.saveStatus === 'failed' && <Button size="xs" onClick={workspace.saveWorkspace}>Retry save</Button>}
-              {workspace.saveStatus !== 'saved' && (
+              {workspace.saveStatus === 'unavailable' && <Button size="xs" onClick={workspace.saveWorkspace}>Retry opening workspace</Button>}
+              {(workspace.saveStatus === 'failed' || workspace.saveStatus === 'conflict') && (
                 <Button size="xs" variant="outline" onClick={() => workspace.downloadWorkspaceCopy()}>Download workspace</Button>
               )}
               {workspace.recoverySnapshot !== null && (
@@ -121,17 +138,25 @@ export default function App() {
               ref={editorWorkspaceRef}
               note={workspace.activeNode}
               view={editorView}
+              wiki={{ suggestions: workspace.wikiSuggestions, follow: workspace.followWikiLink }}
               onChangeContent={workspace.changeContent}
               onCreateNote={createNote}
             />
           </div>
           <RightSidebar
             open={rightSidebarOpen}
+            onCollapse={() => {
+              setRightSidebarOpen(false);
+              rightSidebarToggleRef.current?.focus();
+            }}
             note={workspace.activeNode}
-            tree={workspace.tree}
-            onNavigateHeading={(offset) => editorWorkspaceRef.current?.navigateToHeading(offset)}
+            getNote={(id) => find(workspace.tree, id)}
+            onNavigateHeading={(offset) => editorWorkspaceRef.current?.navigateToOffset(offset)}
             onChangeProperties={workspace.changeProperties}
-            onOpenNote={workspace.openFile}
+            onOpenNote={openLinkedNote}
+            wiki={workspace.wiki}
+            onFollowWikiLink={workspace.followWikiLink}
+            canCreateWikiNote={workspace.canCreateWikiNote}
           />
         </div>
       </main>

@@ -1,11 +1,12 @@
 import { useLayoutEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { CheckSquare, Code2, CornerDownLeft, Heading1, Heading2, Heading3, List, ListOrdered, Minus, Quote, Search, Table2, Type } from 'lucide-react';
+import { CheckSquare, Code2, CornerDownLeft, Heading1, Heading2, Heading3, List, ListOrdered, Minus, Quote, Search, Sigma, SquareFunction, Table2, Type } from 'lucide-react';
 import { Plugin, Selection, TextSelection } from 'prosemirror-state';
 import type { Command } from 'prosemirror-state';
 import type { EditorView } from 'prosemirror-view';
 import { closeHistory } from 'prosemirror-history';
 import { cn } from '@/lib/utils';
+import { mathEditorMetaKey } from './math-visual';
 import type { MarkdownAction } from './toolbar/markdown-toolbar';
 
 const commands = [
@@ -18,6 +19,8 @@ const commands = [
   { id: 'checklist', title: 'Checklist', description: 'Track tasks with checkboxes', icon: CheckSquare },
   { id: 'quote', title: 'Quote', description: 'Highlight a quote or important text', icon: Quote, action: { type: 'quote' } },
   { id: 'code', title: 'Code Block', description: 'Add a block of preformatted code', icon: Code2, action: { type: 'codeBlock' } },
+  { id: 'math-equation', keywords: 'latex katex block formula display', title: 'Math Equation', description: 'Add a centered LaTeX block equation', icon: SquareFunction, action: { type: 'mathBlock' } },
+  { id: 'inline-math', keywords: 'latex katex formula symbol', title: 'Inline Math', description: 'Insert an inline LaTeX expression', icon: Sigma, action: { type: 'inlineMath' } },
   { id: 'table', title: 'Table', description: 'Insert a table to organize data', icon: Table2 },
   { id: 'divider', title: 'Divider', description: 'Add a horizontal divider', icon: Minus },
 ] as const;
@@ -73,6 +76,8 @@ function insertCommand(view: EditorView, match: SlashMatch, command: SlashComman
       formatted.steps.forEach((step) => transaction.step(step));
       transaction.setSelection(Selection.fromJSON(transaction.doc, formatted.selection.toJSON()));
       transaction.setStoredMarks(formatted.storedMarks);
+      const mathIntent = formatted.getMeta(mathEditorMetaKey);
+      if (mathIntent) transaction.setMeta(mathEditorMetaKey, mathIntent);
     });
   } else {
     const cursor = transaction.selection.$from;
@@ -96,7 +101,7 @@ function insertCommand(view: EditorView, match: SlashMatch, command: SlashComman
     }
   }
   view.dispatch(transaction.scrollIntoView());
-  view.focus();
+  if (!transaction.getMeta(mathEditorMetaKey)) view.focus();
 }
 
 export function slashCommandPlugin(publish: (menu: SlashMenuState | null) => void, runCommand: (action: MarkdownAction) => Command) {
@@ -216,7 +221,7 @@ export function SlashMenu({ menu }: { menu: SlashMenuState }) {
   return createPortal(
     <div
       id={menuId}
-      className="fixed z-30 flex w-(--slash-menu-width) max-w-[calc(100dvw-2*var(--spacing))] flex-col overflow-hidden rounded-2xl border border-border bg-popover font-sans font-normal text-popover-foreground shadow-lg [--slash-menu-width:--spacing(112)] supports-backdrop-filter:bg-popover/75 supports-backdrop-filter:backdrop-blur-xl motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-100"
+      className="fixed z-30 flex w-(--slash-menu-width) max-w-[calc(100dvw-2*var(--spacing))] flex-col overflow-hidden rounded-2xl border border-border bg-popover font-sans font-normal text-popover-foreground shadow-lg [--slash-menu-width:--spacing(112)] motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-100"
       style={{
         left: `clamp(var(--spacing), ${menu.left}px, calc(100dvw - min(var(--slash-menu-width), 100dvw - 2 * var(--spacing)) - var(--spacing)))`,
         [menu.above ? 'bottom' : 'top']: `calc(${menu.edge}px + var(--spacing))`,
@@ -258,16 +263,16 @@ export function SlashMenu({ menu }: { menu: SlashMenuState }) {
             id={`${listId}-${command.id}`}
             role="option"
             aria-selected={index === menu.selected}
-            className={cn('grid cursor-pointer grid-cols-[--spacing(7)_minmax(0,1fr)_auto] items-center gap-3 rounded-lg px-3 py-1.5 hover:bg-accent/70',
-              index === menu.selected && 'bg-accent/80 text-accent-foreground')}
+            className={cn('group grid cursor-pointer grid-cols-[--spacing(7)_minmax(0,1fr)_auto] items-center gap-3 rounded-lg px-3 py-1.5 hover:bg-accent hover:text-accent-foreground',
+              index === menu.selected && 'bg-accent text-accent-foreground')}
             onClick={() => menu.choose(command)}
           >
             <command.icon aria-hidden="true" className="size-4 justify-self-center opacity-85" />
             <div className="min-w-0">
               <div className="text-sm leading-tight">{command.title}</div>
-              <div className="text-xs leading-snug text-muted-foreground">{command.description}</div>
+              <div className="text-xs leading-snug text-muted-foreground group-hover:text-accent-foreground group-aria-selected:text-accent-foreground">{command.description}</div>
             </div>
-            {index === menu.selected && <CornerDownLeft aria-hidden="true" className="size-4 text-muted-foreground" />}
+            {index === menu.selected && <CornerDownLeft aria-hidden="true" className="size-4 text-accent-foreground" />}
           </div>
         )) : <p role="status" className="px-3 py-2 text-sm text-muted-foreground">No matching commands.</p>}
       </div>

@@ -1,9 +1,10 @@
 import remarkFrontmatter from 'remark-frontmatter';
 import remarkGfm from 'remark-gfm';
+import remarkMath from 'remark-math';
 import remarkParse from 'remark-parse';
 import { unified } from 'unified';
 
-const markdownParser = unified().use(remarkParse).use(remarkGfm).use(remarkFrontmatter, ['yaml', 'toml']);
+const markdownParser = unified().use(remarkParse).use(remarkGfm).use(remarkFrontmatter, ['yaml', 'toml']).use(remarkMath);
 type MarkdownRoot = ReturnType<typeof markdownParser.parse>;
 export type MarkdownNode = MarkdownRoot | MarkdownRoot['children'][number];
 
@@ -14,7 +15,7 @@ export type NoteHeading = {
   children: NoteHeading[];
 };
 
-type NoteLink = { label: string; target: string };
+export type NoteLink = { label: string; target: string };
 
 export function* walkMarkdown(node: MarkdownNode): Generator<MarkdownNode> {
   yield node;
@@ -23,7 +24,7 @@ export function* walkMarkdown(node: MarkdownNode): Generator<MarkdownNode> {
   }
 }
 
-function inlineText(node: MarkdownNode): string {
+export function inlineText(node: MarkdownNode): string {
   if ('value' in node) return node.value;
   if ('alt' in node) return node.alt ?? '';
   if ('children' in node) return node.children.map((child) => inlineText(child)).join('');
@@ -43,12 +44,19 @@ export function parseNoteMarkdown(content: string) {
   return document;
 }
 
-export function readNoteMarkdown(content: string) {
-  const nodes = [...walkMarkdown(parseNoteMarkdown(content))];
-  const definitions = new Map<string, string>();
+export function readLinkDefinitions(nodes: Iterable<MarkdownNode>) {
+  const definitions = new Map<string, Extract<MarkdownNode, { type: 'definition' }>>();
   for (const node of nodes) {
-    if (node.type === 'definition' && !definitions.has(node.identifier)) definitions.set(node.identifier, node.url);
+    if (node.type === 'definition' && !definitions.has(node.identifier)) definitions.set(node.identifier, node);
   }
+  return definitions;
+}
+
+export function readNoteMarkdown(content: string) {
+  const document = parseNoteMarkdown(content);
+  const frontmatter = document.children[0]?.type === 'yaml' ? document.children[0].value : null;
+  const nodes = [...walkMarkdown(document)];
+  const definitions = readLinkDefinitions(nodes);
 
   const headings: NoteHeading[] = [];
   const parents: NoteHeading[] = [];
@@ -62,11 +70,11 @@ export function readNoteMarkdown(content: string) {
       parents.push(heading);
     }
     if (node.type === 'link' || node.type === 'linkReference') {
-      const target = node.type === 'link' ? node.url : definitions.get(node.identifier);
+      const target = node.type === 'link' ? node.url : definitions.get(node.identifier)?.url;
       if (target) links.push({ label: inlineText(node) || target, target });
     }
   }
 
-  return { headings, links: [...new Map(links.map((link) => [link.target, link])).values()] };
+  return { frontmatter, headings, links };
 }
 

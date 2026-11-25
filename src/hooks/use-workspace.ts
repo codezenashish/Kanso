@@ -1,41 +1,17 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { availableTree, find, insert, readWorkspace, remove, update, writeWorkspace, type NoteProperty, type WorkspaceNode } from '@/lib/workspace-tree';
+import { useMemo, useState } from 'react';
+import { availableTree, find, insert, remove, update, type NoteProperty, type WorkspaceNode } from '@/lib/workspace-tree';
+import { resolveWikiLink, wikiNoteLocation, wikiTarget, type WikiNote } from '@/lib/wiki-index';
+import { useWorkspacePersistence } from './use-workspace-persistence';
 
 export function useWorkspace() {
-  const [loadedWorkspace] = useState(readWorkspace);
-  const [tree, setTree] = useState(loadedWorkspace.tree);
-  const savedWorkspace = useRef(loadedWorkspace);
-  const [saveStatus, setSaveStatus] = useState<'saved' | 'failed' | 'conflict' | 'unavailable'>(
-    'unavailable' in loadedWorkspace ? 'unavailable' : 'saved',
-  );
+  const {
+    tree, wiki, setTree, updateNote, active, setActive, openFiles, setOpenFiles, expanded, setExpanded,
+    saveStatus, saveWorkspace, recoverySnapshot, loading,
+  } = useWorkspacePersistence();
   const visibleTree = useMemo(() => availableTree(tree), [tree]);
-  const [active, setActive] = useState('welcome');
-  const [openFiles, setOpenFiles] = useState<string[]>(['welcome']);
-  const [expanded, setExpanded] = useState<string[]>(['journal']);
   const [draft, setDraft] = useState<{ parent: string | null; kind: WorkspaceNode['kind'] } | null>(null);
   const [draftName, setDraftName] = useState('');
   const [renaming, setRenaming] = useState<string | null>(null);
-
-  const saveWorkspace = useCallback(() => {
-    const previous = savedWorkspace.current;
-    if ('unavailable' in previous || (tree === previous.tree && previous.snapshot !== null)) return;
-    try {
-      const result = writeWorkspace(tree, previous.snapshot, previous.invalid);
-      if (result.status === 'saved') {
-        savedWorkspace.current = { tree, snapshot: result.snapshot, invalid: false };
-      }
-      setSaveStatus(result.status);
-    } catch {
-      setSaveStatus('failed');
-    }
-  }, [tree]);
-
-  useEffect(() => {
-    saveWorkspace();
-  }, [saveWorkspace]);
-
-  const recoverySnapshot = 'invalid' in loadedWorkspace && loadedWorkspace.invalid
-    ? loadedWorkspace.snapshot : null;
 
   function downloadWorkspaceCopy(original = false) {
     const snapshot = original ? recoverySnapshot : JSON.stringify(tree, null, 2);
@@ -54,7 +30,7 @@ export function useWorkspace() {
     if (find(visibleTree, id)?.kind !== 'file') return;
     activateFile(id);
     const lastOpenedAt = Date.now();
-    setTree((nodes) => update(nodes, id, (node) => ({ ...node, lastOpenedAt })));
+    updateNote(id, (node) => ({ ...node, lastOpenedAt }));
   };
 
   function activateFile(id: string) {
@@ -69,6 +45,7 @@ export function useWorkspace() {
   };
 
   const begin = (parent: string | null, kind: 'file' | 'folder') => {
+    if (loading || saveStatus === 'unavailable') return;
     setDraft({ parent, kind });
     setDraftName(kind === 'file' ? 'Untitled.md' : 'New folder');
     if (parent) setExpanded((e) => (e.includes(parent) ? e : [...e, parent]));
@@ -81,7 +58,7 @@ export function useWorkspace() {
     }
     const node: WorkspaceNode = {
       id: crypto.randomUUID(),
-      name: /\.(?:md|ya?ml)$/i.test(name) || draft.kind === 'folder' ? name : `${name}.md`,
+      name: /\.(?:md|txt|ya?ml)$/i.test(name) || draft.kind === 'folder' ? name : `${name}.md`,
       kind: draft.kind,
       content: '',
       lastOpenedAt: draft.kind === 'file' ? Date.now() : undefined,
@@ -98,7 +75,7 @@ export function useWorkspace() {
       setTree((t) =>
         update(t, id, (n) => ({
           ...n,
-          name: n.kind === 'file' && !/\.(?:md|ya?ml)$/i.test(name) ? `${name}.md` : name,
+          name: n.kind === 'file' && !/\.(?:md|txt|ya?ml)$/i.test(name) ? `${name}.md` : name,
         })),
       );
     setRenaming(null);
@@ -137,15 +114,15 @@ export function useWorkspace() {
   }
 
   function toggleNoteFlag(id: string, flag: 'starred' | 'template') {
-    setTree((nodes) => update(nodes, id, (node) => (
+    updateNote(id, (node) => (
       node.kind === 'file' ? { ...node, [flag]: !node[flag] } : node
-    )));
+    ));
   }
 
   function createFromTemplate(id: string) {
     const template = find(visibleTree, id);
     if (!template?.template) return;
-    const extension = template.name.match(/\.(md|ya?ml)$/i)?.[0];
+    const extension = template.name.match(/\.(md|txt|ya?ml)$/i)?.[0];
     const baseName = extension ? template.name.slice(0, -extension.length) : template.name;
     const note: WorkspaceNode = {
       id: crypto.randomUUID(),
@@ -160,15 +137,48 @@ export function useWorkspace() {
   }
 
   const changeContent = (content: string) => {
-    setTree((nodes) => update(nodes, active, (node) => ({ ...node, content })));
+    updateNote(active, (node) => ({ ...node, content }), content);
   };
 
   function changeProperties(properties: NoteProperty[]) {
-    setTree((nodes) => update(nodes, active, (node) => ({ ...node, properties })));
+    updateNote(active, (node) => ({ ...node, properties }));
+  }
+
+  const wikiSuggestions = useMemo(() => Array.from(wiki.catalog.notes.values())
+    .flatMap((note) => {
+      const target = note.active ? wikiTarget(wiki.catalog, note) : null;
+      return target ? [{ ...note, target }] : [];
+    })
+    .sort((left, right) => left.name.localeCompare(right.name) || left.path.localeCompare(right.path)), [wiki.catalog]);
+
+  function getWikiNote(target: string): WikiNote | undefined {
+    const linked = wiki.outgoing.get(active)?.find((link) => link.target === target);
+    return linked?.targetId ? wiki.catalog.notes.get(linked.targetId) : resolveWikiLink(wiki.catalog, target);
+  }
+
+  function canCreateWikiNote(target: string) {
+    return Boolean(wikiNoteLocation(wiki.catalog, target));
+  }
+
+  function followWikiLink(target: string) {
+    const note = getWikiNote(target);
+    if (note) {
+      if (note.active) openFile(note.id);
+      return;
+    }
+    const location = wikiNoteLocation(wiki.catalog, target);
+    if (!location || !confirm(`Create a note named “${location.name}”?`)) return;
+    const id = crypto.randomUUID();
+    setTree((nodes) => insert(nodes, location.parent, {
+      id, name: location.name, kind: 'file', content: '', lastOpenedAt: Date.now(),
+    }));
+    if (location.parent) setExpanded((folders) => [...new Set([...folders, location.parent!])]);
+    activateFile(id);
   }
 
   return {
-    saveStatus, saveWorkspace, recoverySnapshot, downloadWorkspaceCopy,
+    saveStatus, saveWorkspace, recoverySnapshot, downloadWorkspaceCopy, loading,
+    wiki, wikiSuggestions, getWikiNote, canCreateWikiNote, followWikiLink,
     tree: visibleTree, allNodes: tree, activeNode, openFile, closeFile, expanded, setExpanded,
     files: openFiles.flatMap((id) => {
       const file = find(visibleTree, id);

@@ -12,7 +12,7 @@ import {
   Archive, Copy, RotateCcw, Star, Trash2,
 } from 'lucide-react';
 import type { useWorkspace } from '@/hooks/use-workspace';
-import type { WorkspaceNode } from '@/lib/workspace-tree';
+import { searchWorkspaceTree, type WorkspaceNode } from '@/lib/workspace-tree';
 import { cn } from '@/lib/utils';
 
 type FileTreeProps = {
@@ -25,23 +25,14 @@ type FileTreeProps = {
 const rowClass = 'my-px flex h-8 items-center gap-2 rounded-md pr-1 text-sm';
 const iconClass = 'size-4 shrink-0';
 const inputClass =
-  'h-7 min-w-0 flex-1 rounded-sm border border-sidebar-ring bg-background px-1 text-foreground outline-none';
+  'h-7 min-w-0 flex-1 rounded-sm border border-input bg-background px-1 text-foreground outline-none focus:border-ring';
 const menuItemClass =
   'flex h-8 w-full cursor-pointer items-center gap-2 rounded-sm px-2 text-left hover:bg-accent focus-visible:bg-accent';
-
-function filterTree(nodes: WorkspaceNode[], query: string): WorkspaceNode[] {
-  return nodes.flatMap((node) => {
-    const children = node.children ? filterTree(node.children, query) : undefined;
-    return node.name.toLowerCase().includes(query) || node.content?.toLowerCase().includes(query) || children?.length
-      ? [{ ...node, children }]
-      : [];
-  });
-}
 
 export function FileTree({ workspace, query, nodes, browseFolders }: FileTreeProps) {
   const [menu, setMenu] = useState<{ node: WorkspaceNode; x: number; y: number } | null>(null);
   const search = query.trim().toLowerCase();
-  const visibleNodes = search ? filterTree(nodes, search) : nodes;
+  const visibleNodes = search ? searchWorkspaceTree(nodes, search) : nodes;
 
   useEffect(() => {
     if (!menu) return;
@@ -205,7 +196,7 @@ export function FileTree({ workspace, query, nodes, browseFolders }: FileTreePro
       {menu && createPortal(
         <div
           aria-label={`Actions for ${menu.node.name}`}
-          className="fixed z-20 max-h-dvh w-48 overflow-auto rounded-lg border bg-popover p-1 text-sm text-popover-foreground shadow-md"
+          className="fixed z-20 max-h-dvh w-48 overflow-auto rounded-lg border border-border bg-popover p-1 text-sm text-popover-foreground shadow-md"
           style={{
             left: Math.max(0, Math.min(menu.x, window.innerWidth - 196)),
             top: Math.max(0, Math.min(menu.y, window.innerHeight - 224)),
