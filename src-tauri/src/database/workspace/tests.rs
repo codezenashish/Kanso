@@ -8,7 +8,8 @@ fn persists_workspace_crud_and_session_across_restarts() {
     tauri::async_runtime::block_on(async {
         let directory =
             std::env::temp_dir().join(format!("kanso-sqlite-test-{}", std::process::id()));
-        std::fs::create_dir(&directory).unwrap();
+        let _ = std::fs::remove_dir_all(&directory);
+        std::fs::create_dir_all(&directory).unwrap();
         let options = SqliteConnectOptions::new()
             .filename(directory.join("kanso.db"))
             .create_if_missing(true)
@@ -30,7 +31,7 @@ fn persists_workspace_crud_and_session_across_restarts() {
                 {"id":"md", "name":"Notes.md", "parent":null, "kind":"file", "position":1,
                  "format":"markdown", "content":"# Offline\n[[Memo|Memo label]]"}
             ],
-            "tabs": [{"id":"yaml","active":0}, {"id":"note","active":1}],
+            "tabs": [{"id":"note","active":1,"pinned":1}, {"id":"yaml","active":0,"pinned":0}],
             "wikiChanges": [{
                 "id": "md",
                 "links": [{

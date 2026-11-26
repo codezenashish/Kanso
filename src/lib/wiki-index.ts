@@ -1,9 +1,9 @@
 import type { WorkspaceNode } from './database/workspace-types';
+import { ensureNoteExtension, isSourceOnlyNote, noteExtensionPattern } from './workspace-tree';
 import { scanWikiLinks, wikiSyntax, type WikiReference } from './wiki-markdown';
 
-export const noteExtension = /\.(?:md|txt|ya?ml)$/i;
 const key = (name: string) => name.normalize('NFC').toLowerCase();
-export const wikiName = (name: string) => name.replace(noteExtension, '');
+const wikiName = (name: string) => name.replace(noteExtensionPattern, '');
 
 export type WikiNote = { id: string; name: string; path: string; active: boolean };
 export type IndexedWikiLink = WikiReference & { sourceId: string; targetId: string | null };
@@ -58,6 +58,23 @@ export function resolveWikiLink(catalog: Catalog, target: string) {
   return note && key(qualifier[1].replace(/^\//, '')) === key(note.path) ? note : undefined;
 }
 
+export function ambiguousWikiMatches(catalog: Catalog, target: string): WikiNote[] {
+  const trimmed = target.trim();
+  if (!trimmed) return [];
+  const path = trimmed.replace(/^\//, '');
+  const qualified = trimmed.includes('/');
+  const bucket = qualified ? catalog.paths : catalog.names;
+  if (bucket.get(key(path)) !== null) return [];
+  const lookup = key(path);
+  const noExtLookup = key(wikiName(path));
+  return Array.from(catalog.notes.values()).filter((note) => {
+    const candidate = qualified ? note.path : note.name;
+    const fullCandidate = qualified ? note.path : note.path.slice(note.path.lastIndexOf('/') + 1);
+    return key(candidate) === lookup || key(fullCandidate) === lookup
+      || key(wikiName(candidate)) === noExtLookup;
+  });
+}
+
 export function wikiTarget(catalog: Catalog, note: WikiNote) {
   if (!/[\[\]|\\/\r\n]/.test(note.name) && resolveWikiLink(catalog, note.name)?.id === note.id) return note.name;
   for (const path of [wikiName(note.path), note.path]) {
@@ -70,18 +87,20 @@ export function wikiTarget(catalog: Catalog, note: WikiNote) {
   return resolveWikiLink(catalog, qualified)?.id === note.id ? qualified : null;
 }
 
-export function wikiNoteLocation(catalog: Catalog, target: string) {
-  if (/#\^[A-Za-z0-9_-]+$/.test(target)) return null;
+export function wikiNoteLocation(catalog: Catalog, rawTarget: string) {
+  const target = rawTarget.trim();
+  if (!target || /#\^[A-Za-z0-9_-]+$/.test(target)) return null;
   const path = target.replace(/^\//, '');
   const slash = path.lastIndexOf('/');
   const name = path.slice(slash + 1);
-  if (!name || name.trim() !== name || /[\[\]|\\\r\n]/.test(name) || name === '.' || name === '..') return null;
+  if (!name || name.trim() !== name || /[\u0000-\u001f\u007f\[\]|\\]/.test(name) || name.length > 180 || name === '.' || name === '..') return null;
+  if (!wikiName(name).trim()) return null;
   const parent = slash < 0 ? null : catalog.folders.get(key(path.slice(0, slash)));
   if (slash >= 0 && !parent) return null;
   const qualified = target.includes('/');
   const bucket = qualified ? catalog.paths : catalog.names;
   if (bucket.has(key(path)) || bucket.has(key(wikiName(path)))) return null;
-  return { name: noteExtension.test(name) ? name : name + '.md', parent: parent ?? null };
+  return { name: ensureNoteExtension(name), parent: parent ?? null };
 }
 
 function resolveReferences(catalog: Catalog, id: string, references: WikiReference[]): IndexedWikiLink[] {
@@ -117,7 +136,7 @@ export function buildWikiIndex(tree: WorkspaceNode[], stored?: IndexedWikiLink[]
     }
   } else {
     for (const note of files) {
-      if (/\.(?:txt|ya?ml)$/i.test(note.name)) continue;
+      if (isSourceOnlyNote(note.name)) continue;
       const links = resolveReferences(catalog, note.id, scanWikiLinks(note.content ?? ''));
       if (links.length) outgoing.set(note.id, links);
     }
@@ -129,7 +148,7 @@ export function buildWikiIndex(tree: WorkspaceNode[], stored?: IndexedWikiLink[]
 
 export function editWikiIndex(index: WikiIndex, id: string, content: string): WikiIndex {
   const note = index.catalog.notes.get(id);
-  if (!note || /\.(?:txt|ya?ml)$/i.test(note.path)) return index;
+  if (!note || isSourceOnlyNote(note.path)) return index;
   const previous = index.outgoing.get(id) ?? [];
   if (!previous.length && !content.includes('[[')) return index;
   const links = resolveReferences(index.catalog, id, scanWikiLinks(content));
@@ -155,7 +174,7 @@ export function refreshWikiStructure(tree: WorkspaceNode[], previous: WikiIndex)
   const outgoing: WikiIndex['outgoing'] = new Map();
   const incoming: WikiIndex['incoming'] = new Map();
   for (const note of files) {
-    if (/\.(?:txt|ya?ml)$/i.test(note.name)) continue;
+    if (isSourceOnlyNote(note.name)) continue;
     const links = previous.outgoing.get(note.id) ?? [];
     let content = note.content ?? '';
     for (const link of [...links].reverse()) {
@@ -172,7 +191,7 @@ export function refreshWikiStructure(tree: WorkspaceNode[], previous: WikiIndex)
     }
     if (content !== (note.content ?? '')) contents.set(note.id, content);
     const oldNote = previous.catalog.notes.get(note.id);
-    const references = !oldNote || /\.(?:txt|ya?ml)$/i.test(oldNote.path) || contents.has(note.id) ? scanWikiLinks(content) : links;
+    const references = !oldNote || isSourceOnlyNote(oldNote.path) || contents.has(note.id) ? scanWikiLinks(content) : links;
     const resolved = resolveReferences(catalog, note.id, references);
     if (resolved.length) outgoing.set(note.id, resolved);
     addIncoming(incoming, resolved);

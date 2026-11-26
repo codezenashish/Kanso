@@ -11,6 +11,11 @@
     "core:window:allow-minimize",
     "core:window:allow-toggle-maximize",
     "core:window:allow-close",
-    "core:window:allow-destroy"
+    "core:window:allow-destroy",
+    "allow-workspace",
+    "allow-managed-attachments",
+    "allow-version-history",
+    "allow-attachment-management",
+    "allow-markdown-transfer"
   ]
 }

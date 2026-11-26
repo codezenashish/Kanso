@@ -1,17 +1,16 @@
-import { Fragment, Slice } from 'prosemirror-model';
-import { closeHistory } from 'prosemirror-history';
-import type { EditorView } from 'prosemirror-view';
-import { readVisualMarkdown, visualSchema } from './visual-markdown';
-
-const { paragraph, yaml_frontmatter: frontmatter } = visualSchema.nodes;
+import { closeHistory } from '@tiptap/pm/history';
+import { Fragment, Slice } from '@tiptap/pm/model';
+import type { EditorView } from '@tiptap/pm/view';
+import { readVisualMarkdown } from './visual-markdown';
 
 export function pasteVisualMarkdown(view: EditorView, event: ClipboardEvent) {
   const { state } = view;
+  const { paragraph, yaml_frontmatter: frontmatter } = state.schema.nodes;
   if (state.selection.$from.parent.type.spec.code) return false;
 
   const text = event.clipboardData?.getData('text/plain');
   if (!text?.trim()) return false;
-  const { document } = readVisualMarkdown(text);
+  const { document } = readVisualMarkdown(text, state.schema);
   const metadata = document.firstChild?.type === frontmatter ? document.firstChild : null;
   // The HTML slice preserves internal selections, while the Markdown text carries frontmatter.
   if (!metadata && /\bdata-pm-slice=/.test(event.clipboardData?.getData('text/html') ?? '')) return false;
@@ -26,8 +25,8 @@ export function pasteVisualMarkdown(view: EditorView, event: ClipboardEvent) {
     const leadingSpace = text.match(/^[ \t]+/)?.[0];
     const trailingSpace = text.match(/[ \t]+$/)?.[0];
     let content = inline.content;
-    if (leadingSpace) content = Fragment.from(visualSchema.text(leadingSpace)).append(content);
-    if (trailingSpace) content = content.append(Fragment.from(visualSchema.text(trailingSpace)));
+    if (leadingSpace) content = Fragment.from(state.schema.text(leadingSpace)).append(content);
+    if (trailingSpace) content = content.append(Fragment.from(state.schema.text(trailingSpace)));
     transaction.replaceSelection(new Slice(content, 0, 0));
   } else if (!inline) {
     // Positions in the clipboard source do not refer to blocks in the destination note.

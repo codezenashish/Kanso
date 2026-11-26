@@ -4,7 +4,11 @@ import remarkMath from 'remark-math';
 import remarkParse from 'remark-parse';
 import { unified } from 'unified';
 
-const markdownParser = unified().use(remarkParse).use(remarkGfm).use(remarkFrontmatter, ['yaml', 'toml']).use(remarkMath);
+const markdownParser = unified()
+  .use(remarkParse)
+  .use(remarkGfm, { singleTilde: false })
+  .use(remarkFrontmatter, ['yaml', 'toml'])
+  .use(remarkMath);
 type MarkdownRoot = ReturnType<typeof markdownParser.parse>;
 export type MarkdownNode = MarkdownRoot | MarkdownRoot['children'][number];
 

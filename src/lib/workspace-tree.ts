@@ -1,10 +1,37 @@
 import type { WorkspaceNode } from './database/workspace-types';
 export type { NoteProperty, WorkspaceNode } from './database/workspace-types';
 
-export const update = (nodes: WorkspaceNode[], id: string, fn: (n: WorkspaceNode) => WorkspaceNode): WorkspaceNode[] =>
-  nodes.map((n) =>
-    n.id === id ? fn(n) : { ...n, children: n.children ? update(n.children, id, fn) : undefined },
-  );
+export const noteExtensionPattern = /\.(?:md|txt|ya?ml)$/i;
+type NoteFormat = 'markdown' | 'text' | 'yaml';
+
+export function getNoteFormat(name: string): NoteFormat {
+  if (/\.txt$/i.test(name)) return 'text';
+  if (/\.ya?ml$/i.test(name)) return 'yaml';
+  return 'markdown';
+}
+
+export function isSourceOnlyNote(name: string): boolean {
+  return getNoteFormat(name) !== 'markdown';
+}
+
+export function ensureNoteExtension(name: string): string {
+  return noteExtensionPattern.test(name) ? name : `${name}.md`;
+}
+
+export function update(nodes: WorkspaceNode[], id: string, change: (node: WorkspaceNode) => WorkspaceNode): WorkspaceNode[] {
+  let changed = false;
+  const next = nodes.map((node) => {
+    let updated = node;
+    if (node.id === id) updated = change(node);
+    else if (node.children) {
+      const children = update(node.children, id, change);
+      if (children !== node.children) updated = { ...node, children };
+    }
+    changed ||= updated !== node;
+    return updated;
+  });
+  return changed ? next : nodes;
+}
 export const remove = (nodes: WorkspaceNode[], id: string): WorkspaceNode[] =>
   nodes
     .filter((n) => n.id !== id)
@@ -26,10 +53,10 @@ export const find = (nodes: WorkspaceNode[], id: string): WorkspaceNode | undefi
   return undefined;
 };
 
-export function availableTree(nodes: WorkspaceNode[]): WorkspaceNode[] {
-  return nodes.flatMap((node) => node.status ? [] : [{
+export function availableTree(nodes: WorkspaceNode[], includeArchived = false): WorkspaceNode[] {
+  return nodes.flatMap((node) => node.status === 'trashed' || (node.status === 'archived' && !includeArchived) ? [] : [{
     ...node,
-    children: node.children ? availableTree(node.children) : undefined,
+    children: node.children ? availableTree(node.children, includeArchived) : undefined,
   }]);
 }
 
@@ -44,17 +71,4 @@ export function listWorkspaceStatus(nodes: WorkspaceNode[], status: NonNullable<
   });
 }
 
-export function noteTags(node: WorkspaceNode): string[] {
-  return node.properties
-    ?.filter(({ name }) => name.toLowerCase() === 'tags')
-    .flatMap(({ value }) => value.split(',').map((tag) => tag.trim()).filter(Boolean)) ?? [];
-}
-
-export function searchWorkspaceTree(nodes: WorkspaceNode[], query: string): WorkspaceNode[] {
-  return nodes.flatMap((node) => {
-    const children = node.children ? searchWorkspaceTree(node.children, query) : undefined;
-    const matches = [node.name, node.content ?? '', ...noteTags(node)]
-      .some((value) => value.toLowerCase().includes(query));
-    return matches || children?.length ? [{ ...node, children }] : [];
-  });
-}
+export { noteTags } from './note-tags';

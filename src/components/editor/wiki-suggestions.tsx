@@ -1,24 +1,42 @@
 import { useLayoutEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { FileText } from 'lucide-react';
+import { FilePlus2, FileText } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { WikiNote } from '@/lib/wiki-index';
 
 export type WikiSuggestion = WikiNote & { target: string };
-export type WikiMatch = { from: number; to: number; query: string; alias: string | null };
+export type WikiCreateSuggestion = {
+  target: string;
+  name: string;
+  path: string;
+};
+type WikiMatch = { from: number; to: number; query: string; alias: string | null };
 export type WikiMenu = {
   results: WikiSuggestion[];
+  create: WikiCreateSuggestion | null;
   selected: number;
   left: number;
   top: number;
   bottom: number;
   choose: (choice: WikiSuggestion) => void;
+  chooseCreate: () => void;
 };
 
 export const wikiListId = 'wiki-note-suggestions';
+export const wikiCreateOptionId = `${wikiListId}-create`;
+
+export function wikiMenuOptionCount(menu: Pick<WikiMenu, 'results' | 'create'>) {
+  return menu.results.length + (menu.create ? 1 : 0);
+}
+
+export function wikiActiveDescendantId(menu: Pick<WikiMenu, 'results' | 'create' | 'selected'>) {
+  if (menu.selected < menu.results.length) return `${wikiListId}-${menu.selected}`;
+  if (menu.create && menu.selected === menu.results.length) return wikiCreateOptionId;
+  return null;
+}
 
 export function matchWikiInput(prefix: string, cursor: number, suffix = ''): WikiMatch | null {
-  const match = /(^|[^\\\[])\[\[([^\[\]|\r\n]*)(?:\|([^\[\]|\r\n]*))?$/.exec(prefix);
+  const match = /(^|[^\\\[])\[\[([^\[\]|\\\r\n]*)(?:\\?\|([^\[\]|\r\n]*))?$/.exec(prefix);
   if (!match) return null;
   const from = cursor - match[0].length + match[1].length;
   return { from, to: cursor + (suffix.startsWith(']]') ? 2 : 0), query: match[2], alias: match[3] ?? null };
@@ -32,8 +50,11 @@ export function filterWikiNotes(notes: WikiSuggestion[], query: string) {
 
 export function WikiSuggestionMenu({ menu }: { menu: WikiMenu }) {
   const selected = useRef<HTMLDivElement>(null);
-  useLayoutEffect(() => { selected.current?.scrollIntoView({ block: 'nearest' }); }, [menu.selected, menu.results]);
+  useLayoutEffect(() => { selected.current?.scrollIntoView({ block: 'nearest' }); }, [menu.selected, menu.results, menu.create]);
   const above = window.innerHeight - menu.bottom < 190 && menu.top > window.innerHeight - menu.bottom;
+  const createIndex = menu.results.length;
+  const createSelected = Boolean(menu.create) && menu.selected === createIndex;
+
   return createPortal(
     <div
       id={wikiListId}
@@ -64,30 +85,30 @@ export function WikiSuggestionMenu({ menu }: { menu: WikiMenu }) {
           </span>
         </div>
       ))}
-      {!menu.results.length && <p role="status" className="px-2 py-1.5 text-sm text-muted-foreground">No matching notes.</p>}
+      {menu.create && (
+        <div
+          id={wikiCreateOptionId}
+          role="option"
+          aria-selected={createSelected}
+          ref={createSelected ? selected : undefined}
+          className={cn(
+            'group flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground',
+            menu.results.length > 0 && 'mt-1 border-t border-border pt-2',
+            createSelected && 'bg-accent text-accent-foreground',
+          )}
+          onClick={() => menu.chooseCreate()}
+        >
+          <FilePlus2 aria-hidden="true" className="size-4 shrink-0 text-primary" />
+          <span className="min-w-0">
+            <span className="block font-medium wrap-anywhere">Create note</span>
+            <span className="block text-xs text-muted-foreground wrap-anywhere group-hover:text-accent-foreground group-aria-selected:text-accent-foreground">{menu.create.path}</span>
+          </span>
+        </div>
+      )}
+      {!menu.results.length && !menu.create && (
+        <p role="status" className="px-2 py-1.5 text-sm text-muted-foreground">No matching notes.</p>
+      )}
     </div>,
     document.body,
   );
-}
-
-export function textareaCaret(textarea: HTMLTextAreaElement, cursor: number) {
-  const mirror = textarea.ownerDocument.createElement('div');
-  const style = getComputedStyle(textarea);
-  Object.assign(mirror.style, {
-    position: 'fixed', visibility: 'hidden', pointerEvents: 'none',
-    boxSizing: 'border-box', width: `${textarea.clientWidth}px`,
-    whiteSpace: 'pre-wrap', overflowWrap: 'break-word', font: style.font,
-    letterSpacing: style.letterSpacing, tabSize: style.tabSize, padding: style.padding,
-  });
-  const bounds = textarea.getBoundingClientRect();
-  mirror.style.top = `${bounds.top - textarea.scrollTop}px`;
-  mirror.style.left = `${bounds.left - textarea.scrollLeft}px`;
-  mirror.textContent = textarea.value.slice(0, cursor);
-  const marker = textarea.ownerDocument.createElement('span');
-  marker.textContent = textarea.value.slice(cursor) || '\u200b';
-  mirror.append(marker);
-  textarea.ownerDocument.body.append(mirror);
-  const caret = marker.getClientRects()[0] ?? marker.getBoundingClientRect();
-  mirror.remove();
-  return caret;
 }

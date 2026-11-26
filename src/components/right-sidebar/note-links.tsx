@@ -1,13 +1,13 @@
 import { useMemo, useState, type ReactNode } from 'react';
-import { Tooltip } from '@base-ui/react/tooltip';
 import { Collapsible } from '@base-ui/react/collapsible';
 import { isTauri } from '@tauri-apps/api/core';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { ChevronRight, ExternalLink, FileCode, FileText, FileType, Link2Off, Plus, type LucideIcon } from 'lucide-react';
 import type { NoteLink } from '@/lib/note-markdown';
 import type { WikiIndex } from '@/lib/wiki-index';
-import type { WorkspaceNode } from '@/lib/workspace-tree';
+import { getNoteFormat, type WorkspaceNode } from '@/lib/workspace-tree';
 import { Button } from '@/components/ui/button';
+import WarmTooltip from '@/components/ui/warm-tooltip';
 import { cn } from '@/lib/utils';
 import { groupNoteLinks, notePreviewText, type LinkedNote } from './link-sections';
 
@@ -61,6 +61,25 @@ function LinkLabel({ icon: Icon, name, detail, count }: { icon: LucideIcon; name
   );
 }
 
+function LinkedNotePreview({ entry, getNote, markdown }: {
+  entry: LinkedNote;
+  getNote: NoteLinksProps['getNote'];
+  markdown: boolean;
+}) {
+  const { note, references } = entry;
+  const first = references?.[0];
+  const preview = (first ? notePreviewText(first.context, true) : '')
+    || notePreviewText(getNote(note.id)?.content ?? '', markdown);
+
+  return (
+    <span className="block w-52 max-w-[calc(100dvw-2.5rem)] text-xs">
+      <span className="block wrap-anywhere font-semibold">{note.name}</span>
+      <span className="block wrap-anywhere text-muted-foreground">{note.path}</span>
+      {preview && <span className="mt-1 block wrap-anywhere leading-relaxed">{preview}</span>}
+    </span>
+  );
+}
+
 function LinkedNoteRow({ entry, current, onOpenNote, getNote }: Pick<NoteLinksProps, 'onOpenNote' | 'getNote'> & {
   entry: LinkedNote;
   current: boolean;
@@ -69,38 +88,29 @@ function LinkedNoteRow({ entry, current, onOpenNote, getNote }: Pick<NoteLinksPr
   const first = references?.[0];
   const hasMultipleReferences = Boolean(references && references.length > 1);
   const [referencesOpen, setReferencesOpen] = useState(false);
-  const [preview, setPreview] = useState('');
-  const yaml = /\.ya?ml$/i.test(note.path);
-  const markdown = !yaml && !/\.txt$/i.test(note.path);
+  const format = getNoteFormat(note.path);
+  const yaml = format === 'yaml';
+  const markdown = format === 'markdown';
 
   return (
     <li>
       <Collapsible.Root open={referencesOpen} onOpenChange={setReferencesOpen}>
         <div className="flex items-start gap-0.5">
-          <Tooltip.Root onOpenChange={(open) => {
-            if (!open) return;
-            const contextPreview = first ? notePreviewText(first.context, true) : '';
-            setPreview(contextPreview || notePreviewText(getNote(note.id)?.content ?? '', markdown));
-          }}>
-            <Tooltip.Trigger
+          <WarmTooltip
+            content={<LinkedNotePreview entry={entry} getNote={getNote} markdown={markdown} />}
+            side="left"
+            delay={350}
+            className="min-w-0 flex-1"
+          >
+            <button
               type="button"
-              delay={350}
               aria-current={current ? 'page' : undefined}
               className={cn(rowClass, 'flex-1 cursor-pointer')}
               onClick={() => onOpenNote(note.id, first?.offset)}
             >
               <LinkLabel icon={yaml ? FileCode : markdown ? FileText : FileType} name={note.name} detail={note.path} count={hasMultipleReferences ? 1 : count} />
-            </Tooltip.Trigger>
-            <Tooltip.Portal>
-              <Tooltip.Positioner side="left" align="start" sideOffset={8} className="z-40">
-                <Tooltip.Popup role="tooltip" className="w-56 max-w-[calc(100dvw-1rem)] rounded-lg border border-border bg-popover px-3 py-2 text-xs text-popover-foreground shadow-lg">
-                  <span className="block wrap-anywhere font-semibold">{note.name}</span>
-                  <span className="block wrap-anywhere text-muted-foreground">{note.path}</span>
-                  {preview && <p className="mt-1 wrap-anywhere leading-relaxed">{preview}</p>}
-                </Tooltip.Popup>
-              </Tooltip.Positioner>
-            </Tooltip.Portal>
-          </Tooltip.Root>
+            </button>
+          </WarmTooltip>
           {hasMultipleReferences && (
             <Collapsible.Trigger
               aria-label={`${count} references in ${note.name}`}

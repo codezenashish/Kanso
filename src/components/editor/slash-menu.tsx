@@ -1,12 +1,17 @@
 import { useLayoutEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { CheckSquare, Code2, CornerDownLeft, Heading1, Heading2, Heading3, List, ListOrdered, Minus, Quote, Search, Sigma, SquareFunction, Table2, Type } from 'lucide-react';
-import { Plugin, Selection, TextSelection } from 'prosemirror-state';
-import type { Command } from 'prosemirror-state';
-import type { EditorView } from 'prosemirror-view';
-import { closeHistory } from 'prosemirror-history';
+import {
+  AlertTriangle, BookmarkPlus, CheckSquare, Code2, CornerDownLeft, Heading1,
+  Heading2, Heading3, Info, Lightbulb, List, ListOrdered, MessageSquareWarning,
+  Minus, Quote, Search, ShieldAlert, Sigma, SquareFunction, Table2, Type, Workflow,
+} from 'lucide-react';
+import { Extension } from '@tiptap/core';
+import { closeHistory } from '@tiptap/pm/history';
+import { Plugin, Selection, TextSelection, type Command } from '@tiptap/pm/state';
+import type { EditorView } from '@tiptap/pm/view';
 import { cn } from '@/lib/utils';
 import { mathEditorMetaKey } from './math-visual';
+import { mermaidEditMetaKey } from './mermaid-visual';
 import type { MarkdownAction } from './toolbar/markdown-toolbar';
 
 const commands = [
@@ -18,9 +23,16 @@ const commands = [
   { id: 'numbered', title: 'Numbered List', description: 'Create a numbered list', icon: ListOrdered, action: { type: 'orderedList' } },
   { id: 'checklist', title: 'Checklist', description: 'Track tasks with checkboxes', icon: CheckSquare },
   { id: 'quote', title: 'Quote', description: 'Highlight a quote or important text', icon: Quote, action: { type: 'quote' } },
+  { id: 'callout-note', keywords: 'callout info note admonition', title: 'Note Callout', description: 'Highlight helpful background context', icon: Info, action: { type: 'callout', kind: 'note' } },
+  { id: 'callout-tip', keywords: 'callout tip hint suggestion', title: 'Tip Callout', description: 'Share a helpful tip or best practice', icon: Lightbulb, action: { type: 'callout', kind: 'tip' } },
+  { id: 'callout-important', keywords: 'callout important key', title: 'Important Callout', description: 'Emphasize essential information', icon: MessageSquareWarning, action: { type: 'callout', kind: 'important' } },
+  { id: 'callout-warning', keywords: 'callout warning alert', title: 'Warning Callout', description: 'Warn about potential issues', icon: AlertTriangle, action: { type: 'callout', kind: 'warning' } },
+  { id: 'callout-caution', keywords: 'callout caution danger', title: 'Caution Callout', description: 'Flag high-risk actions or pitfalls', icon: ShieldAlert, action: { type: 'callout', kind: 'caution' } },
   { id: 'code', title: 'Code Block', description: 'Add a block of preformatted code', icon: Code2, action: { type: 'codeBlock' } },
+  { id: 'mermaid', keywords: 'mermaid diagram flowchart sequence graph chart', title: 'Mermaid Diagram', description: 'Render a flowchart or sequence diagram', icon: Workflow, action: { type: 'mermaid' } },
   { id: 'math-equation', keywords: 'latex katex block formula display', title: 'Math Equation', description: 'Add a centered LaTeX block equation', icon: SquareFunction, action: { type: 'mathBlock' } },
   { id: 'inline-math', keywords: 'latex katex formula symbol', title: 'Inline Math', description: 'Insert an inline LaTeX expression', icon: Sigma, action: { type: 'inlineMath' } },
+  { id: 'footnote', keywords: 'footnote citation reference note', title: 'Footnote', description: 'Insert a footnote reference and definition', icon: BookmarkPlus, action: { type: 'footnote' } },
   { id: 'table', title: 'Table', description: 'Insert a table to organize data', icon: Table2 },
   { id: 'divider', title: 'Divider', description: 'Add a horizontal divider', icon: Minus },
 ] as const;
@@ -78,6 +90,8 @@ function insertCommand(view: EditorView, match: SlashMatch, command: SlashComman
       transaction.setStoredMarks(formatted.storedMarks);
       const mathIntent = formatted.getMeta(mathEditorMetaKey);
       if (mathIntent) transaction.setMeta(mathEditorMetaKey, mathIntent);
+      const mermaidIntent = formatted.getMeta(mermaidEditMetaKey);
+      if (mermaidIntent) transaction.setMeta(mermaidEditMetaKey, mermaidIntent);
     });
   } else {
     const cursor = transaction.selection.$from;
@@ -87,21 +101,21 @@ function insertCommand(view: EditorView, match: SlashMatch, command: SlashComman
     const remaining = cursor.parent.content.size ? [cursor.parent] : [];
 
     if (command.id === 'checklist') {
-      const item = nodes.list_item.create({ checked: false }, paragraph);
-      transaction.replaceWith(from, to, [nodes.bullet_list.create({ tight: true }, item), ...remaining]);
+      const item = nodes.listItem.create({ checked: false }, paragraph);
+      transaction.replaceWith(from, to, [nodes.bulletList.create({ tight: true }, item), ...remaining]);
       transaction.setSelection(TextSelection.create(transaction.doc, from + 3));
     } else if (command.id === 'table') {
-      const header = nodes.table_row.create(null, Array.from({ length: 2 }, () => nodes.table_header.create(null, paragraph)));
-      const body = nodes.table_row.create(null, Array.from({ length: 2 }, () => nodes.table_cell.create(null, paragraph)));
+      const header = nodes.tableRow.create(null, Array.from({ length: 2 }, () => nodes.tableHeader.create(null, paragraph)));
+      const body = nodes.tableRow.create(null, Array.from({ length: 2 }, () => nodes.tableCell.create(null, paragraph)));
       transaction.replaceWith(from, to, [nodes.table.create(null, [header, body]), ...remaining]);
       transaction.setSelection(TextSelection.create(transaction.doc, from + 4));
     } else {
-      transaction.replaceWith(from, to, [nodes.horizontal_rule.create(), ...(remaining.length ? remaining : [paragraph])]);
+      transaction.replaceWith(from, to, [nodes.horizontalRule.create(), ...(remaining.length ? remaining : [paragraph])]);
       transaction.setSelection(TextSelection.create(transaction.doc, from + 2));
     }
   }
   view.dispatch(transaction.scrollIntoView());
-  if (!transaction.getMeta(mathEditorMetaKey)) view.focus();
+  if (!transaction.getMeta(mathEditorMetaKey) && !transaction.getMeta(mermaidEditMetaKey)) view.focus();
 }
 
 export function slashCommandPlugin(publish: (menu: SlashMenuState | null) => void, runCommand: (action: MarkdownAction) => Command) {
@@ -211,6 +225,22 @@ export function slashCommandPlugin(publish: (menu: SlashMenuState | null) => voi
     },
   });
 }
+
+export const SlashCommandExtension = Extension.create<{
+  onMenuChange: (menu: SlashMenuState | null) => void;
+  runCommand: (action: MarkdownAction) => Command;
+}>({
+  name: 'slashCommand',
+  addOptions() {
+    return {
+      onMenuChange: () => {},
+      runCommand: () => () => false,
+    };
+  },
+  addProseMirrorPlugins() {
+    return [slashCommandPlugin(this.options.onMenuChange, this.options.runCommand)];
+  },
+});
 
 export function SlashMenu({ menu }: { menu: SlashMenuState }) {
   const selectedRef = useRef<HTMLDivElement>(null);

@@ -1,34 +1,34 @@
 import * as React from "react";
-import { Sun, Moon, Monitor, Check } from "lucide-react";
-import { cn } from "../../lib/utils";
+import { Sun, Moon, Monitor } from "lucide-react";
+import { Select } from "@/components/ui/select";
+import { updateSettings, useSettings, type Settings } from "@/lib/settings";
+import { cn } from "@/lib/utils";
 
 /* -------------------------------------------------------------------------- */
 /* Types & Constants                                                          */
 /* -------------------------------------------------------------------------- */
 
-export type Theme = "light" | "dark" | "system";
-export type ResolvedTheme = "light" | "dark";
+type Theme = Settings["theme"];
+type ResolvedTheme = "light" | "dark";
 
-export interface ThemeOption {
+interface ThemeOption {
   value: Theme;
   label: string;
   icon: React.ComponentType<{ className?: string }>;
 }
 
-export const THEME_OPTIONS: readonly ThemeOption[] = [
+const THEME_OPTIONS: readonly ThemeOption[] = [
   { value: "light", label: "Light", icon: Sun },
   { value: "system", label: "System", icon: Monitor },
   { value: "dark", label: "Dark", icon: Moon },
 ] as const;
 
-export interface ThemeContextValue {
+interface ThemeContextValue {
   theme: Theme;
   resolvedTheme: ResolvedTheme;
   setTheme: (theme: Theme) => void;
   toggleTheme: () => void;
 }
-
-const STORAGE_KEY = "theme";
 
 /* -------------------------------------------------------------------------- */
 /* Snappy Transition Helper                                                   */
@@ -38,7 +38,7 @@ const STORAGE_KEY = "theme";
  * Temporarily disables CSS transitions across all DOM elements during theme
  * changes to ensure instant, snappy visual switching without duration lag.
  */
-export function disableTransitions() {
+function disableTransitions() {
   if (typeof document === "undefined") return () => {};
 
   const css = document.createElement("style");
@@ -71,19 +71,19 @@ export function disableTransitions() {
   };
 }
 
-export function getSystemTheme(): ResolvedTheme {
+function getSystemTheme(): ResolvedTheme {
   if (typeof window === "undefined") return "light";
   return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 }
 
-export function resolveTheme(theme: Theme): ResolvedTheme {
+function resolveTheme(theme: Theme): ResolvedTheme {
   if (theme === "system") {
     return getSystemTheme();
   }
   return theme;
 }
 
-export function applyTheme(theme: Theme) {
+function applyTheme(theme: Theme) {
   if (typeof document === "undefined") return;
 
   const resolved = resolveTheme(theme);
@@ -110,146 +110,51 @@ export function applyTheme(theme: Theme) {
 
 const ThemeContext = React.createContext<ThemeContextValue | undefined>(undefined);
 
-export interface ThemeProviderProps {
-  children: React.ReactNode;
-  defaultTheme?: Theme;
-  storageKey?: string;
+function setTheme(theme: Theme) {
+  updateSettings({ theme });
 }
 
-export function ThemeProvider({
-  children,
-  defaultTheme = "system",
-  storageKey = STORAGE_KEY,
-}: ThemeProviderProps) {
-  const [theme, setThemeState] = React.useState<Theme>(() => {
-    if (typeof window === "undefined") return defaultTheme;
-    try {
-      const stored = localStorage.getItem(storageKey);
-      if (stored === "light" || stored === "dark" || stored === "system") {
-        return stored;
-      }
-    } catch (_) {}
-    return defaultTheme;
-  });
-
-  const [resolvedTheme, setResolvedTheme] = React.useState<ResolvedTheme>(() =>
-    resolveTheme(theme)
-  );
-
-  const setTheme = React.useCallback(
-    (newTheme: Theme) => {
-      setThemeState(newTheme);
-      try {
-        localStorage.setItem(storageKey, newTheme);
-      } catch (_) {}
-      applyTheme(newTheme);
-      setResolvedTheme(resolveTheme(newTheme));
-    },
-    [storageKey]
-  );
+export function ThemeProvider({ children }: { children: React.ReactNode }) {
+  const { theme } = useSettings();
+  const [resolvedTheme, setResolvedTheme] = React.useState(() => resolveTheme(theme));
 
   const toggleTheme = React.useCallback(() => {
-    setTheme(
-      theme === "light" ? "dark" : theme === "dark" ? "system" : "light"
-    );
-  }, [theme, setTheme]);
+    setTheme(theme === "light" ? "dark" : theme === "dark" ? "system" : "light");
+  }, [theme]);
 
-  // Handle system preference changes & storage sync across tabs
-  React.useEffect(() => {
-    applyTheme(theme);
-    setResolvedTheme(resolveTheme(theme));
+  React.useLayoutEffect(() => {
+    const syncTheme = () => {
+      applyTheme(theme);
+      setResolvedTheme(resolveTheme(theme));
+    };
+
+    syncTheme();
+    if (theme !== "system") return;
 
     const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
-    const handleMediaChange = () => {
-      if (theme === "system") {
-        applyTheme("system");
-        setResolvedTheme(getSystemTheme());
-      }
-    };
-
-    const handleStorageChange = (e: StorageEvent) => {
-      if (e.key === storageKey && e.newValue) {
-        const val = e.newValue as Theme;
-        if (val === "light" || val === "dark" || val === "system") {
-          setThemeState(val);
-          applyTheme(val);
-          setResolvedTheme(resolveTheme(val));
-        }
-      }
-    };
-
-    mediaQuery.addEventListener("change", handleMediaChange);
-    window.addEventListener("storage", handleStorageChange);
-
-    return () => {
-      mediaQuery.removeEventListener("change", handleMediaChange);
-      window.removeEventListener("storage", handleStorageChange);
-    };
-  }, [theme, storageKey]);
+    mediaQuery.addEventListener("change", syncTheme);
+    return () => mediaQuery.removeEventListener("change", syncTheme);
+  }, [theme]);
 
   const value = React.useMemo(
     () => ({ theme, resolvedTheme, setTheme, toggleTheme }),
-    [theme, resolvedTheme, setTheme, toggleTheme]
+    [theme, resolvedTheme, toggleTheme]
   );
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
 }
 
-/* -------------------------------------------------------------------------- */
-/* useTheme Hook (Works with or without ThemeProvider)                       */
-/* -------------------------------------------------------------------------- */
-
 export function useTheme(): ThemeContextValue {
   const context = React.useContext(ThemeContext);
-
-  // Fallback standalone implementation if not wrapped by ThemeProvider
-  const [localTheme, setLocalTheme] = React.useState<Theme>(() => {
-    if (typeof window === "undefined") return "system";
-    try {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      if (stored === "light" || stored === "dark" || stored === "system") {
-        return stored;
-      }
-    } catch (_) {}
-    return "system";
-  });
-
-  const [localResolved, setLocalResolved] = React.useState<ResolvedTheme>(() =>
-    resolveTheme(localTheme)
-  );
-
-  const setStandaloneTheme = React.useCallback((newTheme: Theme) => {
-    setLocalTheme(newTheme);
-    try {
-      localStorage.setItem(STORAGE_KEY, newTheme);
-    } catch (_) {}
-    applyTheme(newTheme);
-    setLocalResolved(resolveTheme(newTheme));
-  }, []);
-
-  const toggleStandaloneTheme = React.useCallback(() => {
-    setStandaloneTheme(
-      localTheme === "light" ? "dark" : localTheme === "dark" ? "system" : "light"
-    );
-  }, [localTheme, setStandaloneTheme]);
-
-  if (context) {
-    return context;
-  }
-
-  return {
-    theme: localTheme,
-    resolvedTheme: localResolved,
-    setTheme: setStandaloneTheme,
-    toggleTheme: toggleStandaloneTheme,
-  };
+  if (!context) throw new Error("useTheme requires ThemeProvider");
+  return context;
 }
 
 /* -------------------------------------------------------------------------- */
 /* ThemeToggle UI Component                                                   */
 /* -------------------------------------------------------------------------- */
 
-export interface ThemeToggleProps {
+interface ThemeToggleProps {
   /**
    * Display mode:
    * - "segmented": 3 buttons side-by-side (Light, System, Dark)
@@ -275,33 +180,6 @@ export function ThemeToggle({
   showLabel = false,
 }: ThemeToggleProps) {
   const { theme, setTheme, toggleTheme } = useTheme();
-  const [dropdownOpen, setDropdownOpen] = React.useState(false);
-  const dropdownRef = React.useRef<HTMLDivElement>(null);
-
-  // Close dropdown on outside click or Escape
-  React.useEffect(() => {
-    if (!dropdownOpen) return;
-
-    const handleClickOutside = (e: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
-        setDropdownOpen(false);
-      }
-    };
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        setDropdownOpen(false);
-      }
-    };
-
-    document.addEventListener("mousedown", handleClickOutside);
-    document.addEventListener("keydown", handleKeyDown);
-    return () => {
-      document.removeEventListener("mousedown", handleClickOutside);
-      document.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [dropdownOpen]);
-
   // Determine active icon for single-button / cycle displays
   const CurrentIcon =
     theme === "light" ? Sun : theme === "dark" ? Moon : Monitor;
@@ -340,60 +218,23 @@ export function ThemeToggle({
     );
   }
 
-  /* --- Variant 2: Dropdown Menu --- */
+  /* --- Variant 2: Dropdown Select --- */
   if (effectiveVariant === "dropdown") {
     return (
-      <div className={cn("relative inline-block text-left", className)} ref={dropdownRef}>
-        <button
-          type="button"
-          onClick={() => setDropdownOpen((prev) => !prev)}
-          aria-expanded={dropdownOpen}
-          aria-haspopup="true"
-          title={`Theme: ${theme.charAt(0).toUpperCase() + theme.slice(1)}`}
-          className={cn(
-            "inline-flex items-center justify-center gap-1.5 rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs font-medium text-card-foreground shadow-2xs transition-colors duration-150 hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/50",
-            size === "xs" && "h-6 px-2 text-[11px]",
-            size === "sm" && "h-7 px-2.5 text-xs",
-            size === "default" && "h-8 px-3 text-sm"
-          )}
-        >
-          <CurrentIcon className="size-3.5 text-muted-foreground" />
-          {showLabel && (
-            <span className="capitalize">{theme}</span>
-          )}
-        </button>
-
-        {dropdownOpen && (
-          <div className="absolute right-0 bottom-full mb-1 sm:bottom-auto sm:top-full sm:mt-1 z-50 min-w-32 rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-md animate-in fade-in-0 zoom-in-95">
-            {THEME_OPTIONS.map((opt) => {
-              const Icon = opt.icon;
-              const isSelected = theme === opt.value;
-              return (
-                <button
-                  key={opt.value}
-                  type="button"
-                  onClick={() => {
-                    setTheme(opt.value);
-                    setDropdownOpen(false);
-                  }}
-                  className={cn(
-                    "w-full flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-xs motion-safe:transition-colors duration-150 select-none outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
-                    isSelected
-                      ? "bg-accent text-accent-foreground font-medium"
-                      : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"
-                  )}
-                >
-                  <span className="flex items-center gap-2">
-                    <Icon className="size-3.5" />
-                    <span>{opt.label}</span>
-                  </span>
-                  {isSelected && <Check className="size-3 text-foreground" />}
-                </button>
-              );
-            })}
-          </div>
+      <Select
+        value={theme}
+        options={THEME_OPTIONS.map((option) => ({ value: option.value, label: option.label, icon: option.icon }))}
+        onValueChange={(value) => setTheme(value as Theme)}
+        aria-label="Theme"
+        className={cn(
+          "rounded-lg bg-card text-card-foreground",
+          size === "xs" && "h-6 px-2 text-[11px]",
+          size === "sm" && "h-7 px-2.5 text-xs",
+          size === "default" && "h-8 px-3 text-sm",
+          className,
         )}
-      </div>
+        triggerClassName="border-border shadow-2xs"
+      />
     );
   }
 
@@ -437,5 +278,3 @@ export function ThemeToggle({
     </div>
   );
 }
-
-export default ThemeToggle;

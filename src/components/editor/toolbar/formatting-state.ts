@@ -1,24 +1,37 @@
-import type { Mark, Node, ResolvedPos } from 'prosemirror-model';
-import type { EditorState } from 'prosemirror-state';
-import { readVisualMarkdown, translatePosition, visualSchema, writeVisualMarkdown } from '../visual-markdown';
+import type { Mark, Node, ResolvedPos, Schema } from '@tiptap/pm/model';
+import type { EditorState } from '@tiptap/pm/state';
+import { readVisualMarkdown, translatePosition, writeVisualMarkdown } from '../visual-markdown';
 
 type ToggleState = boolean | 'mixed';
-export type FormatToggle = 'bold' | 'italic' | 'underline' | 'strike' | 'inlineCode' | 'inlineMath' | 'bulletList' | 'orderedList' | 'quote' | 'codeBlock';
+export type FormatToggle = 'bold' | 'italic' | 'underline' | 'strike' | 'highlight' | 'superscript' | 'subscript' | 'inlineCode' | 'inlineMath' | 'bulletList' | 'orderedList' | 'quote' | 'callout' | 'codeBlock';
 type Marks = Partial<Record<FormatToggle, ToggleState>>;
 
 export type FormattingState = { toggles: Marks; heading: string; link: boolean };
 export const emptyFormatting: FormattingState = { toggles: {}, heading: '', link: false };
 
-const inlineMarks = {
-  bold: visualSchema.marks.strong,
-  italic: visualSchema.marks.em,
-  underline: visualSchema.marks.underline,
-  strike: visualSchema.marks.strike,
-  inlineCode: visualSchema.marks.code,
-};
-const { heading, paragraph, bullet_list, ordered_list, blockquote, code_block, preserved_markdown, inline_math, math_block } = visualSchema.nodes;
+export function sameFormatting(first: FormattingState, second: FormattingState) {
+  if (first === second) return true;
+  if (first.heading !== second.heading || first.link !== second.link) return false;
+  const toggles = Object.keys(first.toggles) as FormatToggle[];
+  return toggles.length === Object.keys(second.toggles).length
+    && toggles.every((toggle) => first.toggles[toggle] === second.toggles[toggle]);
+}
 
-function inlineStates(groups: readonly (readonly Mark[])[], toggles: Marks) {
+function inlineMarksFor(schema: Schema) {
+  return {
+    bold: schema.marks.bold,
+    italic: schema.marks.italic,
+    underline: schema.marks.underline,
+    strike: schema.marks.strike,
+    highlight: schema.marks.highlight,
+    superscript: schema.marks.superscript,
+    subscript: schema.marks.subscript,
+    inlineCode: schema.marks.code,
+  };
+}
+
+function inlineStates(schema: Schema, groups: readonly (readonly Mark[])[], toggles: Marks) {
+  const inlineMarks = inlineMarksFor(schema);
   for (const name of Object.keys(inlineMarks) as (keyof typeof inlineMarks)[]) {
     const count = groups.reduce((total, marks) => total + Number(Boolean(inlineMarks[name].isInSet(marks))), 0);
     if (count) toggles[name] = count === groups.length || 'mixed';
@@ -26,23 +39,29 @@ function inlineStates(groups: readonly (readonly Mark[])[], toggles: Marks) {
 }
 
 function blockState(position: ResolvedPos, block: Node) {
-  let list: typeof bullet_list | typeof ordered_list | undefined;
+  const { heading, paragraph, bulletList, orderedList, blockquote, callout, codeBlock } = block.type.schema.nodes;
+  let list: typeof bulletList | typeof orderedList | undefined;
   let quote = false;
+  let inCallout = false;
   for (let depth = position.depth; depth > 0; depth--) {
     const { type } = position.node(depth);
-    if (!list && (type === bullet_list || type === ordered_list)) list = type;
+    if (!list && (type === bulletList || type === orderedList)) list = type;
     if (type === blockquote) quote = true;
+    if (type === callout) inCallout = true;
   }
   return {
     heading: block.type === heading ? String(block.attrs.level) : block.type === paragraph ? '0' : '',
-    bulletList: list === bullet_list,
-    orderedList: list === ordered_list,
+    bulletList: list === bulletList,
+    orderedList: list === orderedList,
     quote,
-    codeBlock: block.type === code_block,
+    callout: inCallout,
+    codeBlock: block.type === codeBlock,
   };
 }
 
 function readFormatting(document: Node, from: number, to: number, storedMarks?: readonly Mark[] | null): FormattingState {
+  const schema = document.type.schema;
+  const { preserved_markdown, inline_math, math_block } = schema.nodes;
   const cursor = document.resolve(from);
   if (cursor.parent.type === preserved_markdown) return emptyFormatting;
   const marks: (readonly Mark[])[] = [];
@@ -64,9 +83,9 @@ function readFormatting(document: Node, from: number, to: number, storedMarks?: 
   }
 
   const toggles: Marks = {};
-  inlineStates(marks, toggles);
+  inlineStates(schema, marks, toggles);
   if (hasMath) toggles.inlineMath = hasNonMath ? 'mixed' : true;
-  for (const key of ['bulletList', 'orderedList', 'quote', 'codeBlock'] as const) {
+  for (const key of ['bulletList', 'orderedList', 'quote', 'callout', 'codeBlock'] as const) {
     const count = blocks.filter((block) => block[key]).length;
     if (count) toggles[key] = count === blocks.length || 'mixed';
   }
@@ -74,7 +93,7 @@ function readFormatting(document: Node, from: number, to: number, storedMarks?: 
   return {
     toggles,
     heading: blocks.every((block) => block.heading === level) ? level : '',
-    link: marks.length > 0 && marks.every((group) => Boolean(visualSchema.marks.link.isInSet(group))),
+    link: marks.length > 0 && marks.every((group) => Boolean(schema.marks.link.isInSet(group))),
   };
 }
 
@@ -89,7 +108,7 @@ export function prepareSourceFormatting(source: string) {
 
 export function sourceFormatting({ markdown, blocks }: ReturnType<typeof prepareSourceFormatting>, start: number, end: number) {
   const withinBody = markdown.originals.some(({ node, start: from, end: to }) =>
-    node.type !== visualSchema.nodes.yaml_frontmatter && start <= to && end >= from);
+    node.type.name !== 'yaml_frontmatter' && start <= to && end >= from);
   if (!withinBody) return emptyFormatting;
   const from = translatePosition(blocks, start, 'source');
   const to = translatePosition(blocks, end, 'source');

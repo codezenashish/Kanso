@@ -9,17 +9,20 @@ import {
   FolderOpen,
   FolderPlus,
   MoreHorizontal,
-  Archive, Copy, RotateCcw, Star, Trash2,
+  Archive, Copy, Download, RotateCcw, Star, Trash2, Upload,
 } from 'lucide-react';
 import type { useWorkspace } from '@/hooks/use-workspace';
-import { searchWorkspaceTree, type WorkspaceNode } from '@/lib/workspace-tree';
+import type { WorkspaceNode } from '@/lib/workspace-tree';
 import { cn } from '@/lib/utils';
+import type { MarkdownTransferRequest } from '@/components/markdown-transfer/markdown-transfer-dialog';
 
 type FileTreeProps = {
   workspace: ReturnType<typeof useWorkspace>;
-  query: string;
   nodes: WorkspaceNode[];
   browseFolders: boolean;
+  archiveBrowsing?: boolean;
+  onUseTemplate?: (id: string, restoreFocusTarget: HTMLElement | null) => void;
+  onMarkdownTransfer: (request: MarkdownTransferRequest) => void;
 };
 
 const rowClass = 'my-px flex h-8 items-center gap-2 rounded-md pr-1 text-sm';
@@ -29,10 +32,9 @@ const inputClass =
 const menuItemClass =
   'flex h-8 w-full cursor-pointer items-center gap-2 rounded-sm px-2 text-left hover:bg-accent focus-visible:bg-accent';
 
-export function FileTree({ workspace, query, nodes, browseFolders }: FileTreeProps) {
-  const [menu, setMenu] = useState<{ node: WorkspaceNode; x: number; y: number } | null>(null);
-  const search = query.trim().toLowerCase();
-  const visibleNodes = search ? searchWorkspaceTree(nodes, search) : nodes;
+export function FileTree({ workspace, nodes, browseFolders, archiveBrowsing = false, onUseTemplate, onMarkdownTransfer }: FileTreeProps) {
+  const [menu, setMenu] = useState<{ node: WorkspaceNode; x: number; y: number; opener: HTMLElement | null } | null>(null);
+  const manageTree = browseFolders && !archiveBrowsing;
 
   useEffect(() => {
     if (!menu) return;
@@ -74,14 +76,14 @@ export function FileTree({ workspace, query, nodes, browseFolders }: FileTreePro
   function renderNodes(nodes: WorkspaceNode[], depth = 0) {
     return nodes.map((node) => {
       const folder = node.kind === 'folder';
-      const open = browseFolders && (workspace.expanded.includes(node.id) || Boolean(search));
+      const open = browseFolders && workspace.expanded.includes(node.id);
       const editing = workspace.renaming === node.id;
       const selected = workspace.activeNode?.id === node.id;
       const Icon = folder ? (open ? FolderOpen : Folder) : FileText;
       const Chevron = open ? ChevronDown : ChevronRight;
 
       return (
-        <div key={node.id}>
+        <div key={node.id} data-import-folder={folder && manageTree ? node.id : undefined}>
           <div
             className={cn(
               rowClass,
@@ -91,10 +93,10 @@ export function FileTree({ workspace, query, nodes, browseFolders }: FileTreePro
                 'bg-sidebar-accent font-medium text-sidebar-accent-foreground before:absolute before:inset-y-1.5 before:left-0 before:w-0.5 before:rounded-full before:bg-sidebar-primary',
             )}
             style={{ paddingInlineStart: `calc(var(--spacing) * ${1 + depth * 4})` }}
-            draggable={browseFolders && !editing}
+            draggable={manageTree && !editing}
             onDragStart={(event) => event.dataTransfer.setData('node', node.id)}
             onDragOver={(event) => {
-              if (!folder || !browseFolders) return;
+              if (!folder || !manageTree) return;
               event.preventDefault();
               event.currentTarget.dataset.dropTarget = '';
             }}
@@ -107,11 +109,12 @@ export function FileTree({ workspace, query, nodes, browseFolders }: FileTreePro
               event.preventDefault();
               event.stopPropagation();
               delete event.currentTarget.dataset.dropTarget;
-              if (browseFolders) workspace.move(event.dataTransfer.getData('node'), folder ? node.id : null);
+              if (manageTree) workspace.move(event.dataTransfer.getData('node'), folder ? node.id : null);
             }}
             onContextMenu={(event) => {
               event.preventDefault();
-              setMenu({ node, x: event.clientX, y: event.clientY });
+              const opener = event.currentTarget.querySelector<HTMLElement>('[data-explorer-node]');
+              setMenu({ node, x: event.clientX, y: event.clientY, opener });
             }}
           >
             {editing ? (
@@ -136,7 +139,8 @@ export function FileTree({ workspace, query, nodes, browseFolders }: FileTreePro
                 className="flex h-full min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-sm text-left"
                 aria-expanded={folder && browseFolders ? open : undefined}
                 aria-current={selected ? true : undefined}
-                disabled={Boolean(node.status)}
+                data-explorer-node={node.id}
+                disabled={Boolean(node.status) && !archiveBrowsing}
                 onClick={() => {
                   if (!folder) {
                     workspace.openFile(node.id);
@@ -160,7 +164,7 @@ export function FileTree({ workspace, query, nodes, browseFolders }: FileTreePro
               onClick={(event) => {
                 event.stopPropagation();
                 const rect = event.currentTarget.getBoundingClientRect();
-                setMenu({ node, x: rect.right, y: rect.bottom });
+                setMenu({ node, x: rect.right, y: rect.bottom, opener: event.currentTarget });
               }}
             >
               <MoreHorizontal className={iconClass} />
@@ -168,7 +172,7 @@ export function FileTree({ workspace, query, nodes, browseFolders }: FileTreePro
           </div>
           {folder && open && (
             <div>
-              {renderDraft(node.id, depth + 1)}
+              {manageTree && renderDraft(node.id, depth + 1)}
               {renderNodes(node.children ?? [], depth + 1)}
             </div>
           )}
@@ -181,17 +185,16 @@ export function FileTree({ workspace, query, nodes, browseFolders }: FileTreePro
     <>
       <div
         onDragOver={(event) => {
-          if (browseFolders) event.preventDefault();
+          if (manageTree) event.preventDefault();
         }}
         onDrop={(event) => {
-          if (!browseFolders) return;
+          if (!manageTree) return;
           event.preventDefault();
           workspace.move(event.dataTransfer.getData('node'), null);
         }}
       >
-        {browseFolders && renderDraft(null, 0)}
-        {renderNodes(visibleNodes)}
-        {search && !visibleNodes.length && <p role="status" className="px-2 py-2 text-xs text-muted-foreground">No matching notes.</p>}
+        {manageTree && renderDraft(null, 0)}
+        {renderNodes(nodes)}
       </div>
       {menu && createPortal(
         <div
@@ -202,6 +205,11 @@ export function FileTree({ workspace, query, nodes, browseFolders }: FileTreePro
             top: Math.max(0, Math.min(menu.y, window.innerHeight - 224)),
           }}
         >
+          {menu.node.status !== 'trashed' && (
+            <button className={menuItemClass} onClick={() => onMarkdownTransfer({ mode: 'export', id: menu.node.id })}>
+              <Download className={iconClass} /> Export Markdown
+            </button>
+          )}
           {menu.node.status ? (
             <>
               <button className={menuItemClass} onClick={() => workspace.changeNodeStatus(menu.node.id, undefined)}>
@@ -217,6 +225,11 @@ export function FileTree({ workspace, query, nodes, browseFolders }: FileTreePro
             <>
               {menu.node.kind === 'folder' ? (
                 <>
+                  {!archiveBrowsing && (
+                    <button className={menuItemClass} onClick={() => onMarkdownTransfer({ mode: 'import', destination: menu.node.id })}>
+                      <Upload className={iconClass} /> Import Markdown here
+                    </button>
+                  )}
                   <button className={menuItemClass} onClick={() => workspace.begin(menu.node.id, 'file')}>
                     <FilePlus2 className={iconClass} /> New note inside
                   </button>
@@ -233,7 +246,13 @@ export function FileTree({ workspace, query, nodes, browseFolders }: FileTreePro
                     <FileText className={iconClass} /> {menu.node.template ? 'Remove from Templates' : 'Mark as template'}
                   </button>
                   {menu.node.template && (
-                    <button className={menuItemClass} onClick={() => workspace.createFromTemplate(menu.node.id)}>
+                    <button
+                      className={menuItemClass}
+                      onClick={() => {
+                        if (onUseTemplate) onUseTemplate(menu.node.id, menu.opener);
+                        else workspace.createFromTemplate(menu.node.id);
+                      }}
+                    >
                       <Copy className={iconClass} /> Use template
                     </button>
                   )}

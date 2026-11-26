@@ -1,22 +1,38 @@
-import { useState, type FormEvent } from 'react';
+import { useId, useState, type FormEvent } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { Frontmatter } from '@/lib/note-frontmatter';
-import type { NoteProperty } from '@/lib/workspace-tree';
+import type { NoteProperty, WorkspaceNode } from '@/lib/workspace-tree';
+import { isTagsProperty, readNoteTagState, tagKey, validTagName } from '@/lib/note-tags';
 
 type NotePropertiesProps = {
-  properties: NoteProperty[];
+  note: WorkspaceNode;
   frontmatter: Frontmatter | null;
   onChange: (properties: NoteProperty[]) => void;
+  tagNames: string[];
+  onChangeTags: (tags: string[]) => boolean;
 };
 
 const inputClass = 'h-8 min-w-0 rounded-md border border-input bg-background px-2 text-sm text-foreground focus-visible:outline-2 focus-visible:outline-sidebar-ring';
 
-export function NoteProperties({ properties, frontmatter, onChange }: NotePropertiesProps) {
+export function NoteProperties({ note, frontmatter, onChange, tagNames, onChangeTags }: NotePropertiesProps) {
+  const properties = note.properties ?? [];
   const yamlProperties = frontmatter?.properties ?? [];
+  const { tags, yaml } = readNoteTagState(note);
+  const tagEditingBlocked = yaml.kind === 'blocked';
+  const optionsId = useId();
+  const [tagInput, setTagInput] = useState('');
   const [propertyName, setPropertyName] = useState('');
   const trimmedName = propertyName.trim();
-  const duplicateName = properties.some((property) => property.name.toLowerCase() === trimmedName.toLowerCase());
+  const tagProperty = tagKey(trimmedName) === 'tags';
+  const duplicateName = tagProperty || properties.some((property) => property.name.toLowerCase() === trimmedName.toLowerCase());
+  const usedTags = new Set(tags.map(tagKey));
+  const canAddTag = !tagEditingBlocked && validTagName(tagInput) && !usedTags.has(tagKey(tagInput));
+
+  function addTag(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (canAddTag && onChangeTags([...tags, tagInput])) setTagInput('');
+  }
 
   function addProperty(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -41,9 +57,35 @@ export function NoteProperties({ properties, frontmatter, onChange }: NoteProper
           </dl>
         </section>
       )}
+      <section aria-label="Note tags" className="space-y-2">
+        <h3 className="text-xs font-medium text-muted-foreground">Tags</h3>
+        {!!tags.length && <ul className="flex flex-wrap gap-1">
+          {tags.map((tag) => (
+            <li key={tagKey(tag)} className="flex max-w-full items-center gap-0.5 rounded-md border border-border px-1 text-xs">
+              <span className="truncate" title={tag}>{tag}</span>
+              <Button type="button" size="icon-xs" variant="ghost" aria-label={`Remove tag ${tag}`}
+                disabled={tagEditingBlocked} onClick={() => onChangeTags(tags.filter((value) => tagKey(value) !== tagKey(tag)))}>
+                <Trash2 aria-hidden="true" />
+              </Button>
+            </li>
+          ))}
+        </ul>}
+        {tagEditingBlocked ? <p className="text-xs text-muted-foreground">Edit these YAML tags in Source Mode.</p> : (
+          <form className="flex items-center gap-1" onSubmit={addTag}>
+            <input aria-label="Add note tag" placeholder="Add tag" list={optionsId} className={`flex-1 ${inputClass}`}
+              value={tagInput} onChange={(event) => setTagInput(event.target.value)} />
+            <datalist id={optionsId}>
+              {tagNames.filter((name) => !usedTags.has(tagKey(name))).map((name) => <option key={tagKey(name)} value={name} />)}
+            </datalist>
+            <Button type="submit" size="icon-xs" variant="ghost" aria-label="Add tag to note" disabled={!canAddTag}>
+              <Plus aria-hidden="true" />
+            </Button>
+          </form>
+        )}
+      </section>
       {!properties.length && !yamlProperties.length && !frontmatter?.invalid
         && <p className="text-sm text-muted-foreground">No properties yet.</p>}
-      {properties.map((property) => (
+      {properties.filter((property) => !isTagsProperty(property)).map((property) => (
         <div key={property.name} className="flex items-end gap-1">
           <label className="block min-w-0 flex-1 wrap-anywhere text-xs font-medium">
             {property.name}
@@ -79,7 +121,7 @@ export function NoteProperties({ properties, frontmatter, onChange }: NoteProper
           <Plus />
         </Button>
       </form>
-      {duplicateName && <p role="status" className="text-xs text-destructive">This property already exists.</p>}
+      {duplicateName && <p role="status" className="text-xs text-destructive">{tagProperty ? 'Use the tag field above.' : 'This property already exists.'}</p>}
     </div>
   );
 }

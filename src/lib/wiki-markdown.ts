@@ -1,4 +1,5 @@
-import { parseNoteMarkdown, walkMarkdown } from './note-markdown';
+import { inlineText, parseNoteMarkdown, walkMarkdown } from './note-markdown';
+import { noteExtensionPattern } from './workspace-tree';
 
 export type WikiReference = {
   start: number;
@@ -30,7 +31,7 @@ export function wikiInputContext(source: string, offset: number) {
 
 export function wikiLabel(target: string) {
   const path = target.replace(/#\^[A-Za-z0-9_-]+$/, '');
-  return path.slice(path.lastIndexOf('/') + 1).replace(/\.(?:md|txt|ya?ml)$/i, '') || path;
+  return path.slice(path.lastIndexOf('/') + 1).replace(noteExtensionPattern, '') || path;
 }
 
 export function scanWikiLinks(source: string): WikiReference[] {
@@ -53,12 +54,53 @@ export function scanWikiLinks(source: string): WikiReference[] {
   });
 }
 
+export function findWikiReferenceOnLine(lineText: string, offsetInLine: number): WikiReference | null {
+  if (!lineText.includes('[[')) return null;
+  for (const match of lineText.matchAll(wikiPattern)) {
+    const start = match.index!;
+    const end = start + match[0].length;
+    if (offsetInLine < start || offsetInLine > end) continue;
+    let escape = start;
+    while (escape > 0 && lineText[escape - 1] === '\\') escape--;
+    if ((start - escape) % 2) continue;
+    const target = match[1].trim();
+    if (!target) continue;
+    return {
+      start,
+      end,
+      target,
+      alias: match[2]?.trim() || null,
+      context: lineText.trim(),
+    };
+  }
+  return null;
+}
+
 export function wikiSyntax(target: string, alias: string | null = null, inTable = false) {
   return `[[${target}${alias ? `${inTable ? '\\|' : '|'}${alias}` : ''}]]`;
 }
 
 export function plainWikiText(text: string) {
   return text.replace(wikiPattern, (_, target: string, alias?: string) => alias?.trim() || wikiLabel(target.trim()));
+}
+
+function excerpt(text: string) {
+  const clean = text.replace(/\s+/g, ' ').trim();
+  return clean.length > 190 ? clean.slice(0, 189).trimEnd() + '…' : clean;
+}
+
+export function notePreviewText(source: string, markdown: boolean) {
+  const bounded = source.slice(0, 8192);
+  if (!markdown) return excerpt(bounded);
+  const document = parseNoteMarkdown(bounded);
+  for (const node of walkMarkdown(document)) {
+    if (node.type === 'paragraph' || node.type === 'tableCell' || node.type === 'code') {
+      const preview = excerpt(plainWikiText(inlineText(node)));
+      if (preview) return preview;
+    }
+  }
+  const heading = document.children.find((node) => node.type === 'heading');
+  return heading ? excerpt(plainWikiText(inlineText(heading))) : '';
 }
 
 export function prepareWikiMarkdown(source: string) {

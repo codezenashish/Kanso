@@ -2,7 +2,6 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 @import "@fontsource-variable/geist";
-@import "prosemirror-view/style/prosemirror.css" layer(components);
 @custom-variant dark (&:is(.dark *));
 
 :root {
@@ -171,8 +170,88 @@
 }
 @layer components {
   .editor-text {
-    @apply font-sans text-base leading-[1.65] font-normal text-foreground;
+    @apply font-normal text-foreground;
+    font-family: var(--editor-font-family, var(--font-sans));
+    font-size: var(--editor-font-size, 1rem);
+    line-height: var(--editor-line-height, 1.75);
   }
+
+  [data-editor-font="serif"] {
+    --editor-font-family: var(--font-serif);
+  }
+
+  [data-editor-font="mono"] {
+    --editor-font-family: var(--font-mono);
+  }
+
+  [data-editor-layout="comfortable"] {
+    --editor-content-width: 72ch;
+  }
+
+  [data-editor-layout="wide"] {
+    --editor-content-width: 104ch;
+  }
+
+  .source-editor-frame[data-editor-layout],
+  [data-editor-layout] > .visual-markdown {
+    width: 100%;
+    max-width: var(--editor-content-width, 100%);
+    margin-inline: auto;
+  }
+
+  .document-scroll-navigator {
+    @apply absolute -end-3 top-1/2 z-10 flex max-h-[min(60%,24rem)] w-5 max-w-full -translate-y-1/2 flex-col overflow-y-auto overscroll-contain rounded-lg border border-transparent py-1 [scrollbar-width:none] md:-end-5;
+  }
+
+  .document-scroll-navigator:is(:hover, :focus-within) {
+    @apply w-64 border-border bg-popover text-popover-foreground shadow-md;
+  }
+
+  .document-scroll-navigator button {
+    @apply flex min-h-5 w-full shrink-0 cursor-pointer items-center justify-end gap-2 rounded-sm pe-0.5 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring;
+  }
+
+  .document-scroll-navigator:is(:hover, :focus-within) button {
+    @apply justify-between ps-2 hover:bg-accent hover:text-accent-foreground;
+  }
+
+  .document-section-title {
+    @apply sr-only text-xs leading-5;
+  }
+
+  .document-scroll-navigator:is(:hover, :focus-within) .document-section-title {
+    @apply not-sr-only min-w-0 truncate text-start motion-safe:animate-in motion-safe:fade-in motion-safe:duration-150;
+  }
+
+  .document-section-marker {
+    @apply h-0.5 w-3 shrink-0 rounded-full bg-muted-foreground/60 motion-safe:transition-[width,background-color] motion-safe:duration-150;
+  }
+
+  .document-scroll-navigator button[data-heading-level="1"] .document-section-marker {
+    @apply w-4;
+  }
+
+  .document-scroll-navigator button:is([data-heading-level="3"], [data-heading-level="4"], [data-heading-level="5"], [data-heading-level="6"]) .document-section-marker {
+    @apply w-2;
+  }
+
+  .document-scroll-navigator button:is(:hover, :focus-visible, [aria-current="location"]) .document-section-marker {
+    @apply bg-primary;
+  }
+
+  .document-scroll-navigator button[aria-current="location"] .document-section-title {
+    @apply font-semibold;
+  }
+
+  .source-syntax-heading { @apply font-semibold text-primary; }
+  .source-syntax-muted { @apply text-muted-foreground; }
+  .source-syntax-literal { @apply text-primary/85; }
+  .source-syntax-link { @apply text-primary underline underline-offset-2; }
+  .source-syntax-strong { @apply font-bold; }
+  .source-syntax-emphasis { @apply italic; }
+  .source-syntax-strike { @apply line-through; }
+  .source-syntax-highlight { @apply bg-accent text-accent-foreground; }
+
 
   .visual-markdown {
     @apply min-h-full bg-background wrap-anywhere outline-none;
@@ -182,35 +261,75 @@
     @apply outline-2 -outline-offset-2 outline-ring/50;
   }
 
-  .visual-markdown > :not([hidden]) ~ :not([hidden]) {
-    @apply mt-3;
+  .visual-markdown > :where(:not([hidden])) ~ :where(:not([hidden])) {
+    @apply mt-4;
   }
 
   .visual-markdown :is(h1, h2, h3, h4, h5, h6) {
     @apply leading-tight font-semibold tracking-tight;
   }
 
-  .visual-markdown > :not([hidden]) ~ :is(h1, h2, h3, h4, h5, h6) {
-    @apply mt-6;
+  .visual-markdown > :where(:not([hidden])) ~ :is(h1, h2, h3, h4, h5, h6) {
+    @apply mt-7;
   }
 
-  .visual-markdown h1 { @apply text-3xl; }
+  .visual-markdown > :where(:not([hidden])) ~ :is(h1, h2) {
+    @apply mt-9;
+  }
+
+  .visual-markdown > :is(h1, h2, h3, h4, h5, h6) + :not([hidden]):not(:is(h1, h2, h3, h4, h5, h6)) {
+    @apply mt-2;
+  }
+
+  .visual-markdown h1 { @apply text-[2rem] font-bold; }
   .visual-markdown h2 { @apply text-2xl; }
   .visual-markdown h3 { @apply text-xl; }
   .visual-markdown h4 { @apply text-lg; }
   .visual-markdown h5 { @apply text-base font-semibold; }
-  .visual-markdown h6 { @apply text-sm font-medium; }
+  .visual-markdown h6 { @apply text-sm; }
   .visual-markdown strong { @apply font-bold; }
+  .visual-markdown mark {
+    @apply rounded-xs px-0.5 text-foreground;
+    background-color: oklch(0.89 0.13 94 / 0.55);
+  }
+  .dark .visual-markdown mark {
+    background-color: oklch(0.62 0.14 88 / 0.35);
+  }
+  .visual-markdown sup { @apply align-super text-[0.75em] leading-none; }
+  .visual-markdown sub { @apply align-sub text-[0.75em] leading-none; }
   .visual-markdown :is(a, [data-wiki-target]) { @apply text-primary underline underline-offset-2; }
   .visual-markdown [data-wiki-target] { @apply cursor-pointer rounded-sm hover:bg-accent active:bg-muted focus-visible:outline-2 focus-visible:outline-ring; }
+  .visual-markdown [data-wiki-target][data-wiki-status] { @apply decoration-dashed text-muted-foreground hover:text-foreground; }
+
+  .visual-markdown .is-heading-collapsible {
+    @apply relative;
+  }
+
+  .visual-markdown .editor-collapse-toggle {
+    @apply absolute top-1/2 -left-5 grid size-4 -translate-y-1/2 cursor-pointer place-items-center rounded-sm text-muted-foreground opacity-0 motion-safe:transition-all hover:bg-accent hover:text-foreground focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-ring;
+  }
+
+  .visual-markdown .is-heading-collapsible:hover .editor-collapse-toggle,
+  .visual-markdown .is-heading-collapsible:focus-within .editor-collapse-toggle,
+  .visual-markdown .editor-collapse-toggle[data-collapsed="true"] {
+    opacity: 1;
+  }
+
+  .visual-markdown .editor-collapse-toggle[data-collapsed="true"] svg {
+    transform: rotate(-90deg);
+  }
+
+  .visual-markdown .is-collapsed-section {
+    display: none !important;
+  }
 
   .visual-markdown :is(ul, ol) { @apply ps-6; }
   .visual-markdown ul { @apply list-disc; }
   .visual-markdown ul ul { @apply list-[circle]; }
   .visual-markdown ul ul ul { @apply list-[square]; }
   .visual-markdown ol { @apply list-decimal; }
-  .visual-markdown li + li { @apply mt-1; }
-  .visual-markdown :is(li, [data-task-content], blockquote) > :not(:first-child) { @apply mt-2; }
+  .visual-markdown li + li { @apply mt-1.5; }
+  .visual-markdown :is(li, [data-task-content], blockquote, .editor-callout-content, .editor-footnote-body) > :not(:first-child) { @apply mt-2; }
   .visual-markdown :is(li, [data-task-content]) > :is(ul, ol):not(:first-child) { @apply mt-1; }
   .visual-markdown :is(ul, ol):has(> [data-task]):not(:has(> li:not([data-task]))) > [data-task] {
     @apply -ms-6;
@@ -236,17 +355,293 @@
   .visual-markdown blockquote {
     @apply rounded-e-md border-s-2 border-border bg-sidebar text-sidebar-foreground px-4 py-2;
   }
-  .visual-markdown pre { @apply max-w-full overflow-x-auto rounded-md bg-sidebar p-4 font-mono text-sm leading-relaxed font-normal whitespace-pre text-sidebar-foreground; }
+
+  .visual-markdown .editor-callout {
+    --callout-accent: var(--chart-1);
+    @apply rounded-lg border border-border border-s-4 bg-card/70 px-4 py-3 text-card-foreground;
+    border-inline-start-color: var(--callout-accent);
+  }
+
+  .visual-markdown .editor-callout[data-callout="note"] {
+    --callout-accent: oklch(0.55 0.16 250);
+  }
+  .visual-markdown .editor-callout[data-callout="tip"] {
+    --callout-accent: oklch(0.56 0.15 155);
+  }
+  .visual-markdown .editor-callout[data-callout="important"] {
+    --callout-accent: oklch(0.54 0.17 300);
+  }
+  .visual-markdown .editor-callout[data-callout="warning"] {
+    --callout-accent: oklch(0.66 0.16 75);
+  }
+  .visual-markdown .editor-callout[data-callout="caution"] {
+    --callout-accent: var(--destructive);
+  }
+
+  .dark .visual-markdown .editor-callout[data-callout="note"] {
+    --callout-accent: oklch(0.72 0.14 245);
+  }
+  .dark .visual-markdown .editor-callout[data-callout="tip"] {
+    --callout-accent: oklch(0.72 0.14 155);
+  }
+  .dark .visual-markdown .editor-callout[data-callout="important"] {
+    --callout-accent: oklch(0.72 0.15 300);
+  }
+  .dark .visual-markdown .editor-callout[data-callout="warning"] {
+    --callout-accent: oklch(0.78 0.14 78);
+  }
+
+  .visual-markdown .editor-callout-header {
+    @apply mb-1.5 flex items-center gap-1.5 text-sm font-semibold;
+    color: var(--callout-accent);
+  }
+
+  .visual-markdown .editor-callout-icon {
+    @apply inline-flex shrink-0 items-center;
+  }
+
+  .visual-markdown .editor-callout-select {
+    @apply cursor-pointer appearance-none rounded-sm bg-transparent px-1 py-0.5 text-sm font-semibold text-inherit outline-none hover:bg-accent/60 focus-visible:ring-1 focus-visible:ring-ring;
+  }
+
+  .visual-markdown .editor-callout-custom-title {
+    @apply text-sm font-medium text-foreground;
+  }
+
+  .visual-markdown pre { @apply max-w-full overflow-x-auto wrap-normal rounded-md bg-sidebar p-4 font-mono text-sm leading-relaxed font-normal whitespace-pre text-sidebar-foreground; }
   .visual-markdown code { @apply rounded-sm bg-sidebar px-1 font-mono text-[0.9em] text-sidebar-foreground; }
   .visual-markdown pre code { @apply bg-transparent p-0 text-inherit; }
+
+  .visual-markdown .code-block-node {
+    @apply overflow-hidden rounded-lg border border-border bg-sidebar text-sidebar-foreground;
+  }
+
+  .visual-markdown .code-block-header {
+    @apply flex items-center justify-between gap-2 border-b border-border/70 bg-card/50 px-3 py-1.5 text-xs text-muted-foreground opacity-80 motion-safe:transition-opacity;
+  }
+
+  .visual-markdown .code-block-node:hover .code-block-header,
+  .visual-markdown .code-block-node:focus-within .code-block-header {
+    opacity: 1;
+  }
+
+  .visual-markdown .code-block-lang-select {
+    @apply h-6 cursor-pointer appearance-none rounded-sm bg-transparent px-1.5 text-xs font-medium text-foreground outline-none hover:bg-accent focus-visible:ring-1 focus-visible:ring-ring;
+  }
+
+  .visual-markdown .code-block-actions {
+    @apply flex items-center gap-1;
+  }
+
+  .visual-markdown .code-block-action {
+    @apply inline-flex h-6 cursor-pointer items-center gap-1 rounded-sm px-1.5 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring;
+  }
+
+  .visual-markdown .code-block-action[aria-pressed="true"],
+  .visual-markdown .code-block-action[data-copied="true"] {
+    @apply bg-accent text-accent-foreground;
+  }
+
+  .visual-markdown .code-block-body {
+    @apply flex min-w-0 items-stretch;
+  }
+
+  .visual-markdown .code-block-gutter {
+    @apply hidden shrink-0 select-none flex-col border-e border-border/60 bg-card/30 px-2.5 py-3 text-right font-mono text-xs leading-relaxed text-muted-foreground/75;
+  }
+
+  .visual-markdown .code-block-node[data-line-numbers="true"] .code-block-gutter {
+    display: flex;
+  }
+
+  .visual-markdown .code-block-line-number {
+    @apply block font-mono text-sm leading-relaxed;
+  }
+
+  .visual-markdown .code-block-pre {
+    @apply m-0 min-w-0 flex-1 overflow-x-auto rounded-none bg-transparent px-4 py-3 font-mono text-sm leading-relaxed font-normal whitespace-pre text-sidebar-foreground;
+  }
+
+  .visual-markdown .code-block-node[data-wrap="true"] .code-block-pre {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  .visual-markdown .code-block-content {
+    @apply block bg-transparent p-0 font-mono text-sm leading-relaxed text-inherit;
+  }
+
+  :is(.visual-markdown, .source-editor-frame) .hljs-comment,
+  :is(.visual-markdown, .source-editor-frame) .hljs-quote {
+    color: var(--muted-foreground);
+    font-style: italic;
+  }
+  :is(.visual-markdown, .source-editor-frame) .hljs-keyword,
+  :is(.visual-markdown, .source-editor-frame) .hljs-selector-tag,
+  :is(.visual-markdown, .source-editor-frame) .hljs-subst {
+    color: oklch(0.49 0.16 20);
+  }
+  .dark :is(.visual-markdown, .source-editor-frame) .hljs-keyword,
+  .dark :is(.visual-markdown, .source-editor-frame) .hljs-selector-tag,
+  .dark :is(.visual-markdown, .source-editor-frame) .hljs-subst {
+    color: oklch(0.77 0.14 25);
+  }
+  :is(.visual-markdown, .source-editor-frame) .hljs-string,
+  :is(.visual-markdown, .source-editor-frame) .hljs-doctag,
+  :is(.visual-markdown, .source-editor-frame) .hljs-regexp {
+    color: oklch(0.45 0.12 150);
+  }
+  .dark :is(.visual-markdown, .source-editor-frame) .hljs-string,
+  .dark :is(.visual-markdown, .source-editor-frame) .hljs-doctag,
+  .dark :is(.visual-markdown, .source-editor-frame) .hljs-regexp {
+    color: oklch(0.78 0.12 155);
+  }
+  :is(.visual-markdown, .source-editor-frame) .hljs-title,
+  :is(.visual-markdown, .source-editor-frame) .hljs-section,
+  :is(.visual-markdown, .source-editor-frame) .hljs-function,
+  :is(.visual-markdown, .source-editor-frame) .hljs-selector-id {
+    color: oklch(0.46 0.15 260);
+  }
+  .dark :is(.visual-markdown, .source-editor-frame) .hljs-title,
+  .dark :is(.visual-markdown, .source-editor-frame) .hljs-section,
+  .dark :is(.visual-markdown, .source-editor-frame) .hljs-function,
+  .dark :is(.visual-markdown, .source-editor-frame) .hljs-selector-id {
+    color: oklch(0.77 0.13 255);
+  }
+  :is(.visual-markdown, .source-editor-frame) .hljs-number,
+  :is(.visual-markdown, .source-editor-frame) .hljs-literal,
+  :is(.visual-markdown, .source-editor-frame) .hljs-variable,
+  :is(.visual-markdown, .source-editor-frame) .hljs-template-variable,
+  :is(.visual-markdown, .source-editor-frame) .hljs-attr {
+    color: oklch(0.52 0.14 55);
+  }
+  .dark :is(.visual-markdown, .source-editor-frame) .hljs-number,
+  .dark :is(.visual-markdown, .source-editor-frame) .hljs-literal,
+  .dark :is(.visual-markdown, .source-editor-frame) .hljs-variable,
+  .dark :is(.visual-markdown, .source-editor-frame) .hljs-template-variable,
+  .dark :is(.visual-markdown, .source-editor-frame) .hljs-attr {
+    color: oklch(0.80 0.13 65);
+  }
+  :is(.visual-markdown, .source-editor-frame) .hljs-type,
+  :is(.visual-markdown, .source-editor-frame) .hljs-class .hljs-title,
+  :is(.visual-markdown, .source-editor-frame) .hljs-built_in {
+    color: oklch(0.48 0.13 300);
+  }
+  .dark :is(.visual-markdown, .source-editor-frame) .hljs-type,
+  .dark :is(.visual-markdown, .source-editor-frame) .hljs-class .hljs-title,
+  .dark :is(.visual-markdown, .source-editor-frame) .hljs-built_in {
+    color: oklch(0.78 0.12 300);
+  }
+  :is(.visual-markdown, .source-editor-frame) .hljs-meta,
+  :is(.visual-markdown, .source-editor-frame) .hljs-tag,
+  :is(.visual-markdown, .source-editor-frame) .hljs-name {
+    color: oklch(0.47 0.12 225);
+  }
+  .dark :is(.visual-markdown, .source-editor-frame) .hljs-meta,
+  .dark :is(.visual-markdown, .source-editor-frame) .hljs-tag,
+  .dark :is(.visual-markdown, .source-editor-frame) .hljs-name {
+    color: oklch(0.76 0.12 225);
+  }
+
+  .visual-markdown [data-footnote-ref] {
+    @apply mx-0.5 inline-flex cursor-pointer items-center rounded-sm bg-accent/70 px-1 align-super font-mono text-[0.72em] leading-tight font-medium text-primary no-underline motion-safe:transition-colors hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring;
+  }
+
+  .visual-markdown [data-footnote-ref][data-footnote-active="true"],
+  .visual-markdown .editor-footnote-def[data-footnote-active="true"] {
+    @apply bg-accent ring-2 ring-ring/50;
+  }
+
+  .visual-markdown .editor-footnote-def {
+    @apply flex items-start gap-2.5 rounded-md border border-border/70 bg-card/40 px-3 py-2 text-sm text-foreground motion-safe:transition-colors;
+  }
+
+  .visual-markdown .editor-footnote-badge {
+    @apply mt-0.5 shrink-0 cursor-pointer rounded-sm bg-accent/80 px-1.5 py-0.5 font-mono text-xs font-medium text-primary hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring;
+  }
+
+  .visual-markdown .editor-footnote-body {
+    @apply min-w-0 flex-1;
+  }
+
+  .visual-markdown .mermaid-block-node {
+    @apply overflow-hidden rounded-lg border border-border bg-card/60 text-card-foreground;
+  }
+
+  .visual-markdown .mermaid-block-header {
+    @apply flex items-center justify-between gap-2 border-b border-border/70 bg-sidebar/70 px-3 py-1.5 text-xs text-muted-foreground;
+  }
+
+  .visual-markdown .mermaid-block-badge {
+    @apply font-mono text-xs font-medium text-foreground;
+  }
+
+  .visual-markdown .mermaid-block-actions {
+    @apply flex items-center gap-1;
+  }
+
+  .visual-markdown .mermaid-block-action {
+    @apply cursor-pointer rounded-sm px-2 py-0.5 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring;
+  }
+
+  .visual-markdown .mermaid-block-delete:hover {
+    @apply bg-destructive/15 text-destructive;
+  }
+
+  .visual-markdown .mermaid-block-apply {
+    @apply cursor-pointer rounded-sm bg-primary px-2.5 py-0.5 text-xs font-medium text-primary-foreground hover:opacity-90 focus-visible:outline-2 focus-visible:outline-ring;
+  }
+
+  .visual-markdown .mermaid-preview {
+    @apply flex min-h-24 items-center justify-center overflow-x-auto p-4;
+  }
+
+  .visual-markdown .mermaid-svg-host svg {
+    max-width: 100%;
+    height: auto;
+  }
+
+  .visual-markdown .mermaid-empty {
+    @apply text-xs text-muted-foreground italic;
+  }
+
+  .visual-markdown .mermaid-error {
+    @apply flex w-full flex-col gap-1 rounded-md border border-destructive/35 bg-destructive/10 px-3 py-2 text-xs text-destructive;
+  }
+
+  .visual-markdown .mermaid-editor {
+    @apply flex flex-col gap-2 border-t border-border/70 bg-background/70 p-3;
+  }
+
+  .visual-markdown .mermaid-source-input {
+    @apply w-full resize-y rounded-md border border-input bg-background px-2.5 py-2 font-mono text-sm leading-snug text-foreground placeholder:text-muted-foreground focus-visible:outline-2 focus-visible:outline-ring;
+  }
+
+  .visual-markdown .mermaid-editor-footer {
+    @apply flex items-center justify-between gap-2;
+  }
+
+  .visual-markdown .mermaid-editor-hint {
+    @apply text-[0.6875rem] text-muted-foreground;
+  }
+
+  .visual-markdown .mermaid-editor-buttons {
+    @apply flex items-center gap-1;
+  }
+
   .visual-markdown hr { @apply border-border; }
 
-  .visual-markdown table { @apply w-full table-fixed border-collapse; }
+  .visual-markdown .editor-table-scroll { @apply max-w-full overflow-x-auto; }
+  .visual-markdown table { @apply w-auto max-w-none table-auto border-collapse; }
   .visual-markdown th { @apply bg-sidebar text-start font-medium text-sidebar-foreground; }
-  .visual-markdown :is(td, th) { @apply relative wrap-anywhere border border-border px-3 py-1.5 text-start align-top; }
+  .visual-markdown :is(td, th) { @apply relative min-w-12 wrap-break-word border border-border px-3 py-1.5 text-start align-top; }
+  .visual-markdown li { @apply relative; }
+  .visual-markdown [draggable][contenteditable="false"] { user-select: text; }
   .visual-markdown .ProseMirror-selectednode { @apply outline-2 outline-ring; }
   .visual-markdown li.ProseMirror-selectednode { @apply outline-none; }
-  .visual-markdown li.ProseMirror-selectednode::after { @apply start-[-1.5rem] end-[-2px] border-ring; }
+  .visual-markdown li.ProseMirror-selectednode::after {
+    @apply pointer-events-none absolute -top-0.5 -bottom-0.5 start-[-1.5rem] end-[-2px] border-2 border-ring content-[""];
+  }
 
   .visual-markdown .selectedCell { @apply bg-accent outline -outline-offset-1 outline-ring/40; }
 
@@ -255,7 +650,7 @@
   }
 
   .visual-markdown .math-inline-node {
-    @apply mx-0.5 inline cursor-pointer rounded-sm px-1 py-0.5 align-baseline text-foreground motion-safe:transition-colors hover:bg-accent/70;
+    @apply inline-block max-w-full cursor-pointer overflow-x-auto rounded-sm px-1 py-0.5 align-middle text-foreground motion-safe:transition-colors hover:bg-accent/70;
   }
 
   .visual-markdown .math-inline-node.ProseMirror-selectednode,
@@ -265,10 +660,11 @@
 
   .visual-markdown .math-inline-node .katex {
     font-size: 1.05em;
+    white-space: nowrap;
   }
 
   .visual-markdown .math-block-node {
-    @apply relative cursor-pointer overflow-x-auto rounded-lg border border-transparent bg-card/50 px-4 py-3 text-center text-foreground motion-safe:transition-colors hover:border-border hover:bg-card;
+    @apply relative max-w-full cursor-pointer overflow-x-auto rounded-lg border border-transparent bg-card/50 px-4 py-3 text-center text-foreground motion-safe:transition-colors hover:border-border hover:bg-card;
   }
 
   .visual-markdown .math-block-node.ProseMirror-selectednode,
@@ -277,7 +673,7 @@
   }
 
   .visual-markdown .math-block-node .katex-display {
-    @apply my-0;
+    @apply my-0 w-max min-w-full;
   }
 
   .visual-markdown .math-empty {
@@ -329,4 +725,110 @@
     @apply bg-background font-normal text-foreground;
     letter-spacing: var(--tracking-normal);
   }
+}
+
+.source-editor-frame .cm-editor {
+  @apply h-full text-foreground;
+  font-family: var(--editor-font-family, var(--font-sans));
+  font-size: var(--editor-font-size, 1rem);
+  line-height: var(--editor-line-height, 1.65);
+}
+
+.source-editor-frame .cm-scroller {
+  @apply font-[inherit] [line-height:inherit] [scrollbar-gutter:stable];
+}
+
+.source-editor-frame .cm-content {
+  @apply min-h-full px-0 py-0 caret-foreground;
+}
+
+.source-editor-frame .cm-line {
+  @apply px-0;
+}
+
+.source-editor-frame .cm-editor.cm-focused {
+  @apply outline-none;
+}
+
+.source-editor-frame .cm-content ::selection {
+  @apply bg-primary/25;
+}
+
+@layer components {
+  .visual-markdown .managed-attachment {
+    @apply inline-block max-w-full overflow-hidden rounded-lg border border-border bg-card align-middle;
+  }
+
+  .visual-markdown .managed-attachment[data-align="left"] { display: block; margin-inline-end: auto; }
+  .visual-markdown .managed-attachment[data-align="center"] { display: block; margin-inline: auto; }
+  .visual-markdown .managed-attachment[data-align="right"] { display: block; margin-inline-start: auto; }
+
+  .visual-markdown .managed-attachment[data-kind="image"] {
+    width: var(--attachment-width);
+    max-width: 100%;
+  }
+
+  .visual-markdown .attachment-display {
+    @apply block min-w-0;
+  }
+
+  .visual-markdown .managed-attachment img {
+    @apply block h-auto max-w-full object-contain;
+  }
+
+  .visual-markdown .managed-attachment img:not([hidden]) {
+    width: 100%;
+  }
+
+  .visual-markdown .managed-attachment[data-kind="file"] {
+    @apply inline-flex max-w-full flex-wrap items-center gap-x-3 gap-y-1 px-2.5 py-1.5;
+  }
+
+  .visual-markdown .attachment-label {
+    @apply wrap-anywhere text-sm font-medium;
+  }
+
+  .visual-markdown :is(.attachment-caption, .attachment-status) {
+    @apply block wrap-anywhere px-2.5 py-1 text-xs text-muted-foreground;
+  }
+
+  .visual-markdown .attachment-status:empty,
+  .visual-markdown .managed-attachment [hidden] {
+    display: none;
+  }
+
+  .visual-markdown .attachment-controls {
+    @apply block max-w-full px-2 py-1;
+  }
+
+  .visual-markdown .managed-attachment[data-kind="file"] .attachment-controls {
+    @apply p-0;
+  }
+
+  .visual-markdown .attachment-controls button {
+    @apply cursor-pointer rounded-md border border-border bg-background px-2 py-1 text-xs font-medium hover:bg-accent hover:text-accent-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring disabled:cursor-default disabled:opacity-50;
+  }
+
+  .visual-markdown .attachment-options {
+    @apply mt-1 grid max-w-full gap-2 pb-1 text-xs sm:grid-cols-2;
+  }
+
+  .visual-markdown .attachment-options label {
+    @apply grid min-w-0 gap-1 font-medium;
+  }
+
+  .visual-markdown .attachment-options :is(input, select) {
+    @apply min-h-8 min-w-0 rounded-md border border-input bg-background px-2 text-sm text-foreground focus-visible:outline-2 focus-visible:outline-ring;
+  }
+}
+
+.editor-search-match {
+  background-color: color-mix(in oklab, var(--ring) 20%, transparent);
+  box-shadow: inset 0 -1px var(--ring);
+}
+
+.editor-search-active {
+  background-color: var(--foreground);
+  color: var(--background);
+  box-shadow: none;
 }

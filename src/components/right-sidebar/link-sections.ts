@@ -1,6 +1,8 @@
-import { inlineText, parseNoteMarkdown, walkMarkdown, type NoteLink } from '@/lib/note-markdown';
+import { type NoteLink } from '@/lib/note-markdown';
 import { resolveWikiLink, type WikiIndex, type WikiNote } from '@/lib/wiki-index';
-import { plainWikiText, wikiLabel } from '@/lib/wiki-markdown';
+import { notePreviewText, wikiLabel } from '@/lib/wiki-markdown';
+
+export { notePreviewText };
 
 export type LinkedNote = {
   note: WikiNote;
@@ -8,8 +10,8 @@ export type LinkedNote = {
   references?: { offset: number; context: string }[];
 };
 
-export type ExternalNoteLink = { href: string; host: string; label: string; count: number };
-export type UnresolvedNoteLink = { target: string; name: string; detail: string; count: number; wiki: boolean };
+type ExternalNoteLink = { href: string; host: string; label: string; count: number };
+type UnresolvedNoteLink = { target: string; name: string; detail: string; count: number; wiki: boolean };
 
 function increment<T extends { count: number }>(entries: Map<string, T>, key: string, entry: Omit<T, 'count'>) {
   const existing = entries.get(key);
@@ -77,23 +79,4 @@ export function groupNoteLinks(index: WikiIndex, noteId: string, markdown: NoteL
     external: [...external.values()],
     unresolved: [...unresolved.values()],
   };
-}
-
-export function notePreviewText(source: string, markdown: boolean) {
-  const bounded = source.slice(0, 8192);
-  if (!markdown) return excerpt(bounded);
-  const document = parseNoteMarkdown(bounded);
-  for (const node of walkMarkdown(document)) {
-    if (node.type === 'paragraph' || node.type === 'tableCell' || node.type === 'code') {
-      const preview = excerpt(plainWikiText(inlineText(node)));
-      if (preview) return preview;
-    }
-  }
-  const heading = document.children.find((node) => node.type === 'heading');
-  return heading ? excerpt(plainWikiText(inlineText(heading))) : '';
-}
-
-function excerpt(text: string) {
-  const clean = text.replace(/\s+/g, ' ').trim();
-  return clean.length > 190 ? clean.slice(0, 189).trimEnd() + '…' : clean;
 }

@@ -1,338 +1,279 @@
-import { useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type Ref } from 'react';
-import { TextSelection, type EditorState } from 'prosemirror-state';
-import { EditorView as ProseMirrorView } from 'prosemirror-view';
+import { useCallback, useDeferredValue, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type Ref } from 'react';
+import { EditorSelection } from '@codemirror/state';
+import { EditorView as SourceEditorView } from '@codemirror/view';
+import { useAttachmentInsertion } from './attachments/use-attachment-insertion';
+import { DocumentScrollNavigator } from './document-scroll-navigator';
+import type { EditorLayout } from './editor-layout';
 import type { EditorView } from './editor-header';
+import { FloatingToolbar, type FloatingToolbarState } from './floating-toolbar';
 import { MathEditorPopover } from './math-editor-popover';
 import type { MathEditorSession } from './math-visual';
 import { SlashMenu, type SlashMenuState } from './slash-menu';
-import { formatSource } from './source-formatting';
-import { normalizeNewlines, originalSourceOffset, restoreSourceNewlines } from './source-newlines';
-import { emptyFormatting, prepareSourceFormatting, sourceFormatting, visualFormatting } from './toolbar/formatting-state';
+import { formatSource } from './source/source-formatting';
+import { normalizeNewlines, originalSourceOffset } from './source-newlines';
+import { EditorSearchPanel, useSearchShortcut } from './search/editor-search-panel';
+import type { SearchEditor } from './search/editor-search';
+import { useSourceEditor } from './hooks/use-source-editor';
+import { useVisualEditor, type SourceSelection } from './hooks/use-visual-editor';
+import { emptyFormatting, prepareSourceFormatting, sourceFormatting } from './toolbar/formatting-state';
 import { MarkdownToolbar, type MarkdownAction } from './toolbar/markdown-toolbar';
-import { copyVisualMarkdown, createVisualState, formatVisual } from './visual-editor';
-import { wikiInputContext, wikiSyntax } from '@/lib/wiki-markdown';
-import { filterWikiNotes, matchWikiInput, textareaCaret, WikiSuggestionMenu, wikiListId, type WikiMenu, type WikiSuggestion } from './wiki-suggestions';
+import { formatVisual } from './visual-editor';
+import { WikiLinkPreview, type WikiPreviewTrigger } from './wiki-link-preview';
+import { WikiSuggestionMenu, type WikiMenu } from './wiki-suggestions';
 import type { WikiEditorActions } from './wiki-visual';
-import { readVisualMarkdown, translatePosition, writeVisualMarkdown, type VisualMarkdown } from './visual-markdown';
 
 export type MarkdownEditorHandle = {
-  navigateToOffset: (offset: number) => void;
+  navigateToOffset: (offset: number, end?: number) => void;
   rememberSelection: () => void;
+  focus: () => void;
 };
 
 type MarkdownEditorProps = {
   ref?: Ref<MarkdownEditorHandle>;
+  noteId: string;
+  onPrepareAttachment: () => Promise<boolean>;
   value: string;
   view: EditorView;
+  layout: EditorLayout;
+  onChangeLayout: (layout: EditorLayout) => void;
   sourceLabel?: string;
   wiki: WikiEditorActions;
   onChange: (value: string) => void;
 };
 
-type SourceSelection = { start: number; end: number; backward?: boolean };
-type VisualSession = { markdown: VisualMarkdown; state: EditorState; content: string };
+const clipboardExtensions: Record<string, string> = {
+  'image/png': 'png',
+  'image/jpeg': 'jpg',
+  'image/gif': 'gif',
+  'image/webp': 'webp',
+};
 
-function placeSourceSelection(source: HTMLTextAreaElement, selection: SourceSelection, markdown: string) {
-  const normalizeOffset = (offset: number) => normalizeNewlines(markdown.slice(0, offset)).length;
-  const start = normalizeOffset(selection.start);
-  const end = normalizeOffset(selection.end);
-  const probe = source.cloneNode(false) as HTMLTextAreaElement;
-  probe.removeAttribute('aria-label');
-  probe.inert = true;
-  Object.assign(probe.style, { position: 'absolute', visibility: 'hidden', width: `${source.clientWidth}px`, height: '0', overflow: 'hidden' });
-  probe.value = source.value.slice(0, start);
-  source.after(probe);
-  const caretTop = probe.scrollHeight;
-  probe.remove();
-
-  source.focus({ preventScroll: true });
-  source.setSelectionRange(start, end, selection.backward ? 'backward' : 'forward');
-  source.scrollTop = caretTop - source.clientHeight / 2;
+function clipboardImage(file: File) {
+  const extension = clipboardExtensions[file.type];
+  return extension && !/\.(?:png|jpe?g|gif|webp)$/i.test(file.name)
+    ? new File([file], `Clipboard image.${extension}`, { type: file.type })
+    : file;
 }
 
-function placeVisualSelection(view: ProseMirrorView, markdown: VisualMarkdown, selection: SourceSelection) {
-  const { doc } = view.state;
-  const { blocks } = writeVisualMarkdown(markdown, doc);
-  const from = translatePosition(blocks, selection.start, 'source');
-  const to = translatePosition(blocks, selection.end, 'source');
-  const anchor = doc.resolve(selection.backward ? to : from);
-  const head = doc.resolve(selection.backward ? from : to);
-  view.dispatch(view.state.tr.setSelection(TextSelection.between(anchor, head)).scrollIntoView());
-  view.focus();
+function placeSourceSelection(source: SourceEditorView, selection: SourceSelection, markdown: string) {
+  const start = normalizeNewlines(markdown.slice(0, selection.start)).length;
+  const end = normalizeNewlines(markdown.slice(0, selection.end)).length;
+  const range = EditorSelection.range(selection.backward ? end : start, selection.backward ? start : end);
+  source.focus();
+  source.dispatch({ selection: range, effects: SourceEditorView.scrollIntoView(range, { y: 'center' }) });
 }
 
-export function MarkdownEditor({ ref, value, view, sourceLabel, wiki, onChange }: MarkdownEditorProps) {
-  const [visualFormats, setVisualFormats] = useState(emptyFormatting);
+export function MarkdownEditor({ ref, noteId, onPrepareAttachment, value, view, layout, onChangeLayout, sourceLabel, wiki, onChange }: MarkdownEditorProps) {
   const [sourceRange, setSourceRange] = useState({ start: 0, end: 0 });
+  const sourceSnapshot = useMemo(() => ({ value, range: sourceRange }), [value, sourceRange]);
+  const { value: deferredSource, range: deferredRange } = useDeferredValue(sourceSnapshot);
   const sourceDocument = useMemo(
-    () => view === 'source' && !sourceLabel ? prepareSourceFormatting(normalizeNewlines(value)) : null,
-    [value, view, sourceLabel],
+    () => view === 'source' && !sourceLabel ? prepareSourceFormatting(normalizeNewlines(deferredSource)) : null,
+    [view, sourceLabel, deferredSource],
   );
-  const formats = useMemo(() => view === 'document' ? visualFormats
-    : sourceDocument ? sourceFormatting(sourceDocument, sourceRange.start, sourceRange.end) : emptyFormatting,
-  [view, visualFormats, sourceDocument, sourceRange]);
-
-  function recordSourceSelection(source: HTMLTextAreaElement) {
-    const { selectionStart: start, selectionEnd: end } = source;
-    setSourceRange((previous) => previous.start === start && previous.end === end ? previous : { start, end });
-  }
-
-  function recordVisualSelection(state: EditorState) {
-    const next = visualFormatting(state);
-    setVisualFormats((previous) => previous.heading === next.heading && previous.link === next.link
-      && JSON.stringify(previous.toggles) === JSON.stringify(next.toggles) ? previous : next);
-  }
-
   const [wikiMenu, setWikiMenu] = useState<WikiMenu | null>(null);
-  const sourceMenu = useRef({ signature: '', dismissed: '', selected: 0 });
+  const [wikiPreview, setWikiPreview] = useState<WikiPreviewTrigger | null>(null);
   const [slashMenu, setSlashMenu] = useState<SlashMenuState | null>(null);
   const [mathEditor, setMathEditor] = useState<MathEditorSession | null>(null);
-  const sourceRef = useRef<HTMLTextAreaElement>(null);
-  const visualHostRef = useRef<HTMLDivElement>(null);
-  const visualViewRef = useRef<ProseMirrorView>(null);
-  const visualSessionRef = useRef<VisualSession>(null);
-  const pendingSelectionRef = useRef<SourceSelection>(null);
-  const documentRef = useRef({ value, onChange, wiki });
-
-  useLayoutEffect(() => {
-    documentRef.current = { value, onChange, wiki };
-  }, [value, onChange, wiki]);
+  const [floatingToolbar, setFloatingToolbar] = useState<FloatingToolbarState | null>(null);
+  const workspaceHost = useRef<HTMLDivElement>(null);
+  const [search, setSearch] = useState<{ open: boolean; replace: boolean; focusRequest: number }>({
+    open: false, replace: false, focusRequest: 0,
+  });
+  const searchReturnFocus = useRef<HTMLElement>(null);
+  const sourceHost = useRef<HTMLDivElement>(null);
+  const visualHost = useRef<HTMLDivElement>(null);
+  const paneScrollPositions = useRef<Partial<Record<EditorView, number>>>({});
+  const pendingSelection = useRef<SourceSelection>(null);
+  const sourceEditor = useSourceEditor({
+    active: view === 'source',
+    value, label: sourceLabel, host: sourceHost, wiki, onChange,
+    onSelection(start, end) {
+      setSourceRange((previous) => previous.start === start && previous.end === end ? previous : { start, end });
+    },
+    publishWiki: setWikiMenu,
+    publishWikiPreview: setWikiPreview,
+    mapAttachmentPosition: (changes) => attachments.mapPosition('source', (position) => changes.mapPos(position, 1)),
+  });
+  const visual = useVisualEditor({
+    active: view === 'document',
+    noteId,
+    mapAttachmentPosition: (mapping) => attachments.mapPosition('document', (position) => mapping.map(position, 1)),
+    host: visualHost,
+    value, wiki, onChange,
+    publishWikiMenu: setWikiMenu,
+    publishWikiPreview: setWikiPreview,
+    publishSlashMenu: setSlashMenu,
+    publishMathEditor: setMathEditor,
+    publishFloatingToolbar: setFloatingToolbar,
+  });
+  const attachments = useAttachmentInsertion(noteId, onPrepareAttachment, () => {
+    if (sourceLabel) return null;
+    if (view === 'source' && sourceEditor.current) return { mode: 'source', editor: sourceEditor.current };
+    if (view === 'document' && visual.editor.current) return { mode: 'document', editor: visual.editor.current.view };
+    return null;
+  });
+  const formats = useMemo(() => view === 'document' ? visual.formats
+    : sourceDocument ? sourceFormatting(sourceDocument, deferredRange.start, deferredRange.end) : emptyFormatting,
+  [view, visual.formats, sourceDocument, deferredRange]);
 
   useLayoutEffect(() => {
     setWikiMenu(null);
+    setWikiPreview(null);
+    setSlashMenu(null);
     setMathEditor(null);
-    const selection = pendingSelectionRef.current;
-    pendingSelectionRef.current = null;
-    if (view === 'source') {
-      if (selection && sourceRef.current) placeSourceSelection(sourceRef.current, selection, documentRef.current.value);
-      return;
+    setFloatingToolbar(null);
+    const selection = pendingSelection.current;
+    pendingSelection.current = null;
+    if (!selection) return;
+    if (visual.editor.current) visual.placeSelection(selection);
+    else if (sourceEditor.current) placeSourceSelection(sourceEditor.current, selection, value);
+    const pane = view === 'document' ? visualHost.current : sourceEditor.current?.scrollDOM;
+    const previousScroll = paneScrollPositions.current[view];
+    if (pane && previousScroll !== undefined) {
+      const restore = requestAnimationFrame(() => { pane.scrollTop = previousScroll; });
+      return () => cancelAnimationFrame(restore);
     }
-
-    const host = visualHostRef.current;
-    if (!host) return;
-    const markdownContent = documentRef.current.value;
-    let session = visualSessionRef.current;
-    if (!session || session.content !== markdownContent) {
-      const markdown = readVisualMarkdown(markdownContent);
-      session = {
-        markdown,
-        state: createVisualState(markdown, setSlashMenu, () => documentRef.current.wiki, setWikiMenu, setMathEditor),
-        content: markdownContent,
-      };
-      visualSessionRef.current = session;
-    }
-    const activeSession = session;
-
-    const editor = new ProseMirrorView(host, {
-      state: activeSession.state,
-      attributes: {
-        role: 'textbox',
-        'aria-label': 'Visual Markdown editor',
-        'aria-multiline': 'true',
-        class: 'visual-markdown editor-text',
-        spellcheck: 'false',
-      },
-      clipboardTextSerializer: (slice) => copyVisualMarkdown(slice.content),
-      dispatchTransaction(transaction) {
-        const { state: nextState, transactions } = editor.state.applyTransaction(transaction);
-        editor.updateState(nextState);
-        recordVisualSelection(nextState);
-        activeSession.state = nextState;
-        if (transactions.some((applied) => applied.docChanged)) {
-          const { content } = writeVisualMarkdown(activeSession.markdown, nextState.doc);
-          if (content !== activeSession.content) {
-            activeSession.content = content;
-            documentRef.current.onChange(content);
-          }
-        }
-      },
-    });
-    visualViewRef.current = editor;
-    recordVisualSelection(editor.state);
-    if (selection) placeVisualSelection(editor, activeSession.markdown, selection);
-    return () => {
-      visualViewRef.current = null;
-      editor.destroy();
-    };
   }, [view]);
 
-  useLayoutEffect(() => {
-    const editor = visualViewRef.current;
-    const session = visualSessionRef.current;
-    if (!editor || !session || session.content === value) return;
-    const markdown = readVisualMarkdown(value);
-    const current = editor.state.doc.content;
-    const next = markdown.document.content;
-    const start = current.findDiffStart(next);
-    session.markdown = markdown;
-    session.content = value;
-    if (start !== null) {
-      const end = current.findDiffEnd(next)!;
-      const overlap = start - Math.min(end.a, end.b);
-      const transaction = editor.state.tr.replace(start, end.a + Math.max(0, overlap),
-        markdown.document.slice(start, end.b + Math.max(0, overlap))).setMeta('addToHistory', false);
-      session.state = editor.state.apply(transaction);
-      editor.updateState(session.state);
-      recordVisualSelection(session.state);
-    }
-  }, [value, view]);
+  const visualEditor = visual.editor;
+  const focusEditor = useCallback(() => {
+    if (visualEditor.current) visualEditor.current.view.focus();
+    else sourceEditor.current?.focus();
+  }, [sourceEditor, visualEditor]);
 
-  useLayoutEffect(() => {
-    if (view === 'source' && sourceRef.current) recordSourceSelection(sourceRef.current);
-  }, [view, value]);
 
-  useLayoutEffect(() => {
-    const source = sourceRef.current;
-    if (view !== 'source' || !source) return;
-    // Native selection events also cover programmatic cursor changes.
-    const sync = () => recordSourceSelection(source);
-    source.addEventListener('select', sync);
-    return () => source.removeEventListener('select', sync);
-  }, [view]);
+  const readSearchEditor = useCallback((): SearchEditor | null => {
+    if (visualEditor.current) return { mode: 'visual', view: visualEditor.current.view };
+    return sourceEditor.current ? { mode: 'source', view: sourceEditor.current } : null;
+  }, [sourceEditor, visualEditor]);
+
+  const showSearch = useCallback((replace: boolean) => {
+    if (!search.open) searchReturnFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setSearch((previous) => ({ open: true, replace, focusRequest: previous.focusRequest + 1 }));
+  }, [search.open]);
+
+  const closeSearch = useCallback(() => {
+    setSearch((previous) => ({ ...previous, open: false }));
+    const previous = searchReturnFocus.current;
+    if (previous?.isConnected && previous !== document.body && previous.getClientRects().length) {
+      previous.focus({ preventScroll: true });
+    } else focusEditor();
+  }, [focusEditor]);
+
+  useSearchShortcut(workspaceHost, search.open, showSearch, closeSearch);
 
   useImperativeHandle(ref, () => ({
+    focus: focusEditor,
     rememberSelection() {
-      const editor = visualViewRef.current;
-      const session = visualSessionRef.current;
-      if (editor && session) {
-        const { blocks } = writeVisualMarkdown(session.markdown, editor.state.doc);
-        const { from, to, anchor, head } = editor.state.selection;
-        pendingSelectionRef.current = {
-          start: translatePosition(blocks, from, 'editor'),
-          end: translatePosition(blocks, to, 'editor'),
+      if (visual.editor.current) {
+        paneScrollPositions.current.document = visualHost.current?.scrollTop;
+        pendingSelection.current = visual.readSelection();
+      } else if (sourceEditor.current) {
+        paneScrollPositions.current.source = sourceEditor.current.scrollDOM.scrollTop;
+        const { from, to, anchor, head } = sourceEditor.current.state.selection.main;
+        pendingSelection.current = {
+          start: originalSourceOffset(value, from),
+          end: originalSourceOffset(value, to),
           backward: anchor > head,
         };
-      } else if (sourceRef.current) {
-        const source = sourceRef.current;
-        pendingSelectionRef.current = {
-          start: originalSourceOffset(value, source.selectionStart),
-          end: originalSourceOffset(value, source.selectionEnd),
-          backward: source.selectionDirection === 'backward',
-        };
       }
     },
-    navigateToOffset(offset) {
-      const selection = { start: offset, end: offset };
-      const editor = visualViewRef.current;
-      const session = visualSessionRef.current;
-      if (editor && session) placeVisualSelection(editor, session.markdown, selection);
-      else if (sourceRef.current) {
-        placeSourceSelection(sourceRef.current, selection, value);
-        recordSourceSelection(sourceRef.current);
-      }
+    navigateToOffset(offset, end = offset) {
+      const selection = { start: offset, end };
+      if (visual.editor.current) visual.placeSelection(selection);
+      else if (sourceEditor.current) placeSourceSelection(sourceEditor.current, selection, value);
     },
-  }), [value]);
+  }));
 
-  function focusEditor() {
-    if (visualViewRef.current) visualViewRef.current.focus();
-    else sourceRef.current?.focus({ preventScroll: true });
-  }
-
-  function changeSource(content: string) {
-    onChange(restoreSourceNewlines(value, content));
-  }
-
-  function syncSourceWiki(source: HTMLTextAreaElement) {
-    if (sourceLabel || source.selectionStart !== source.selectionEnd || document.activeElement !== source) {
-      setWikiMenu(null);
-      return;
-    }
-    const cursor = source.selectionStart;
-    const line = source.value.lastIndexOf('\n', cursor - 1);
-    const match = matchWikiInput(source.value.slice(line + 1, cursor), cursor, source.value.slice(cursor));
-    const state = sourceMenu.current;
-    const context = match && wikiInputContext(source.value, match.from);
-    if (!match || !context) {
-      state.dismissed = '';
-      setWikiMenu(null);
-      return;
-    }
-    const signature = `${match.from}:${match.query}:${match.alias ?? ''}`;
-    if (state.dismissed === signature) return;
-    if (state.signature !== signature) state.selected = 0;
-    state.signature = signature;
-    const results = filterWikiNotes(wiki.suggestions, match.query);
-    state.selected = Math.min(state.selected, Math.max(0, results.length - 1));
-    const caret = textareaCaret(source, cursor);
-    setWikiMenu({
-      results, selected: state.selected, left: caret.left, top: caret.top, bottom: caret.bottom,
-      choose(note: WikiSuggestion) {
-        const syntax = wikiSyntax(note.target, match.alias?.trim() || null, context.inTable);
-        source.focus();
-        source.setSelectionRange(match.from, match.to);
-        if (!source.ownerDocument.execCommand('insertText', false, syntax)) {
-          source.setRangeText(syntax, match.from, match.to, 'end');
-          changeSource(source.value);
-        }
-        setWikiMenu(null);
-      },
-    });
-  }
-
-  function applyFormatting(action: MarkdownAction) {
-    if (visualViewRef.current) formatVisual(visualViewRef.current, action);
-    else if (sourceRef.current) {
-      formatSource(sourceRef.current, action, changeSource);
-      recordSourceSelection(sourceRef.current);
-    }
-  }
+  const applyFormatting = useCallback((action: MarkdownAction) => {
+    if (visualEditor.current) formatVisual(visualEditor.current, action);
+    else if (sourceEditor.current) formatSource(sourceEditor.current, action);
+  }, [sourceEditor, visualEditor]);
 
   return (
-    <>
-      {!sourceLabel && <MarkdownToolbar key={view} formats={formats} onAction={applyFormatting} onReturnFocus={focusEditor} />}
-      <textarea
-        ref={sourceRef}
+    <div ref={workspaceHost} className="relative flex min-h-0 min-w-0 flex-1 flex-col"
+      onDragOverCapture={(event) => {
+        if (sourceLabel || !event.dataTransfer.types.includes('Files')) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = 'copy';
+      }}
+      onDropCapture={(event) => {
+        if (sourceLabel || !event.dataTransfer.files.length) return;
+        event.preventDefault();
+        event.stopPropagation();
+        void attachments.run(Array.from(event.dataTransfer.files), { x: event.clientX, y: event.clientY });
+      }}
+      onPasteCapture={(event) => {
+        if (sourceLabel || !event.clipboardData.files.length
+            || event.clipboardData.getData('text/html') || event.clipboardData.getData('text/plain')
+            || !(event.target instanceof Element) || !event.target.closest('.cm-content, .visual-markdown')
+            || event.target.closest('[data-attachment-controls]')) return;
+        const images = Array.from(event.clipboardData.files)
+          .filter((file) => file.type.startsWith('image/')).map(clipboardImage);
+        if (!images.length) return;
+        event.preventDefault();
+        event.stopPropagation();
+        void attachments.run(images);
+      }}
+    >
+      {!sourceLabel && (
+        <MarkdownToolbar
+          key={view}
+          formats={formats}
+          layout={layout}
+          onChangeLayout={onChangeLayout}
+          onAction={applyFormatting}
+          onReturnFocus={focusEditor}
+          onAttachFile={attachments.run}
+          attachingFile={attachments.busy}
+        />
+      )}
+      {search.open && <EditorSearchPanel
+        readEditor={readSearchEditor}
+        value={value}
+        mode={view}
+        replaceOpen={search.replace}
+        focusRequest={search.focusRequest}
+        onClose={closeSearch}
+      />}
+      <div role="status" className={attachments.message ? 'absolute inset-x-2 bottom-2 z-10 mx-auto w-fit max-w-[calc(100%-1rem)] rounded-md border border-border bg-popover px-2.5 py-1.5 text-sm text-popover-foreground shadow-sm' : 'sr-only'}>
+        {attachments.message}
+      </div>
+      <div
+        ref={sourceHost}
         hidden={view !== 'source'}
-        aria-label={sourceLabel ?? 'Markdown source'}
-        className="min-h-0 w-full flex-1 resize-none bg-background bg-local editor-text focus-visible:outline-2 focus-visible:outline-ring/50"
-        spellCheck={false}
-        value={normalizeNewlines(value)}
-        aria-controls={view === 'source' && wikiMenu ? wikiListId : undefined}
-        aria-activedescendant={view === 'source' && wikiMenu?.results.length ? `${wikiListId}-${wikiMenu.selected}` : undefined}
-        onChange={(event) => {
-          changeSource(event.target.value);
-          recordSourceSelection(event.currentTarget);
-          syncSourceWiki(event.currentTarget);
-        }}
-        onSelect={(event) => {
-          recordSourceSelection(event.currentTarget);
-          syncSourceWiki(event.currentTarget);
-        }}
-        onScroll={(event) => { if (wikiMenu) syncSourceWiki(event.currentTarget); }}
-        onBlur={() => { if (view === 'source') setWikiMenu(null); }}
-        onKeyDown={(event) => {
-          if (wikiMenu && !event.nativeEvent.isComposing) {
-            const state = sourceMenu.current;
-            if (event.key === 'Escape') {
-              event.preventDefault();
-              state.dismissed = state.signature;
-              setWikiMenu(null);
-              return;
-            }
-            const count = wikiMenu.results.length;
-            if (count && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
-              event.preventDefault();
-              state.selected = (state.selected + count + (event.key === 'ArrowDown' ? 1 : -1)) % count;
-              syncSourceWiki(event.currentTarget);
-              return;
-            }
-            if (count && event.key === 'Enter') {
-              event.preventDefault();
-              wikiMenu.choose(wikiMenu.results[state.selected]);
-              return;
-            }
-          }
-          if (sourceLabel || !(event.metaKey || event.ctrlKey) || event.altKey) return;
-          const key = event.key.toLowerCase();
-          if (key !== 'b' && key !== 'i') return;
-          event.preventDefault();
-          applyFormatting({ type: key === 'b' ? 'bold' : 'italic' });
-        }}
+        data-editor-layout={sourceLabel ? undefined : layout}
+        className="source-editor-frame min-h-0 w-full flex-1 bg-background"
       />
-      {view === 'document' && <div ref={visualHostRef} className="min-h-0 flex-1 overflow-auto bg-background bg-local" />}
+      {view === 'document' && (
+        <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+          <div
+            ref={visualHost}
+            data-editor-layout={layout}
+            className="min-h-0 flex-1 overflow-auto bg-background bg-local [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          />
+          <DocumentScrollNavigator scrollHost={visualHost} />
+        </div>
+      )}
       {wikiMenu && <WikiSuggestionMenu menu={wikiMenu} />}
+      {!sourceLabel && (
+        <WikiLinkPreview
+          trigger={wikiPreview}
+          suppressed={Boolean(search.open || wikiMenu || slashMenu || mathEditor)}
+          resolvePreview={wiki.preview}
+        />
+      )}
       {view === 'document' && slashMenu && <SlashMenu menu={slashMenu} />}
+      {view === 'document' && !search.open && !slashMenu && !wikiMenu && !mathEditor && (
+        <FloatingToolbar
+          state={floatingToolbar}
+          formats={formats}
+          onAction={applyFormatting}
+          onReturnFocus={focusEditor}
+        />
+      )}
       {view === 'document' && <MathEditorPopover session={mathEditor} />}
-    </>
+    </div>
   );
 }

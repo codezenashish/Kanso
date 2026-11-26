@@ -1,6 +1,6 @@
 import katex from 'katex';
 
-export type LatexRenderResult = {
+type LatexRenderResult = {
   html: string;
   error: string | null;
 };

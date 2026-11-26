@@ -1,21 +1,23 @@
+import { tagKey } from '@/lib/note-tags';
 import type { WikiIndex, WikiNote } from '@/lib/wiki-index';
 
 export type GraphFilters = {
   query: string;
   folder: string;
+  tag: string;
   depth: number;
   showOrphans: boolean;
 };
 
 export type GraphMode = 'local' | 'global';
-export type GraphEdge = { source: string; target: string; count: number };
+type GraphEdge = { source: string; target: string; count: number };
 export type NoteGraph = {
   nodes: WikiNote[];
   links: GraphEdge[];
   neighbors: Map<string, Set<string>>;
 };
 
-const normalize = (text: string) => text.normalize('NFC').toLocaleLowerCase();
+export const normalizeGraphText = (text: string) => text.normalize('NFC').toLocaleLowerCase();
 
 function localNotes(index: WikiIndex, activeId: string, depth: number) {
   if (!index.catalog.notes.get(activeId)?.active) return [];
@@ -60,13 +62,20 @@ export function buildNoteGraph(index: WikiIndex, mode: GraphMode, activeId: stri
   return { nodes: candidates, links: [...edges.values()], neighbors };
 }
 
-export function filterNoteGraph(graph: NoteGraph, filters: Omit<GraphFilters, 'depth'>, localRoot?: string): NoteGraph {
-  const query = normalize(filters.query.trim());
+export function filterNoteGraph(
+  graph: NoteGraph,
+  filters: Omit<GraphFilters, 'depth'>,
+  localRoot?: string,
+  noteTags?: ReadonlyMap<string, readonly string[]>,
+): NoteGraph {
+  const query = normalizeGraphText(filters.query.trim());
+  const tag = tagKey(filters.tag);
   const nodes = graph.nodes.filter((note) => {
     const inFolder = !filters.folder || (filters.folder === '/' ? !note.path.includes('/') : note.path.startsWith(filters.folder + '/'));
-    const matches = !query || normalize(note.path).includes(query) || normalize(note.name).includes(query);
+    const matches = !query || normalizeGraphText(note.path).includes(query) || normalizeGraphText(note.name).includes(query);
+    const hasTag = !tag || Boolean(noteTags?.get(note.id)?.some((entry) => tagKey(entry) === tag));
     const connected = filters.showOrphans || note.id === localRoot || graph.neighbors.get(note.id)?.size;
-    return inFolder && matches && connected;
+    return inFolder && matches && hasTag && connected;
   });
   const neighbors = new Map(nodes.map(({ id }) => [id, new Set<string>()]));
   const links = graph.links.filter(({ source, target }) => {

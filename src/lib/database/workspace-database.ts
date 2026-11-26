@@ -1,5 +1,7 @@
+import { buildWorkspaceTags } from '@/lib/workspace-tags';
+import { tagKey } from '@/lib/note-tags';
 import { invoke } from '@tauri-apps/api/core';
-import { availableTree, find, noteTags } from '@/lib/workspace-tree';
+import { availableTree, find, getNoteFormat, listWorkspaceNotes, noteTags } from '@/lib/workspace-tree';
 import { buildWikiIndex, wikiLinkChanges, type IndexedWikiLink, type WikiIndex } from '@/lib/wiki-index';
 import { initialTree, parseLegacyWorkspace, workspaceStorageKey } from './legacy-workspace';
 import type { WorkspaceNode, WorkspaceSnapshot } from './workspace-types';
@@ -11,6 +13,7 @@ type StoredNode = {
   parent: string | null;
   status: WorkspaceNode['status'] | null;
   content?: string | null;
+  tags?: string[];
   properties?: WorkspaceNode['properties'] | null;
   starred?: number;
   template?: number;
@@ -21,17 +24,18 @@ type StoredWorkspace = {
   revision: number;
   legacyDigest: string | null;
   nodes: StoredNode[];
-  tabs: { id: string; active: number }[];
+  tabs: { id: string; active: number; pinned?: number }[];
   expanded: string[];
+  managedTags?: string[];
   wikiLinks: IndexedWikiLink[] | null;
 };
 
-function flattenTree(tree: WorkspaceNode[], parent: string | null = null): object[] {
-  return tree.flatMap(({ children, ...node }, position): object[] => {
+function flattenTree(tree: WorkspaceNode[], catalog: ReturnType<typeof buildWorkspaceTags>, parent: string | null = null): object[] {
+  return tree.flatMap((current, position): object[] => {
+    const { children, ...node } = current;
     const entry = { ...node, parent, position };
-    if (node.kind === 'folder') return [entry, ...flattenTree(children ?? [], node.id)];
-    const format = /\.txt$/i.test(node.name) ? 'text' : /\.ya?ml$/i.test(node.name) ? 'yaml' : 'markdown';
-    return [{ ...entry, format, tags: noteTags(node) }];
+    if (node.kind === 'folder') return [entry, ...flattenTree(children ?? [], catalog, node.id)];
+    return [{ ...entry, format: getNoteFormat(node.name), tags: noteTags(current).map((name) => catalog.get(tagKey(name))?.name ?? name) }];
   });
 }
 
@@ -57,17 +61,20 @@ function restoreTree(rows: StoredNode[]): WorkspaceNode[] {
   return tree;
 }
 
-export function saveSnapshot(snapshot: WorkspaceSnapshot, revision: number | null, legacyDigest: string | null = null, previousWiki?: WikiIndex) {
-  const visible = availableTree(snapshot.tree);
+export function saveSnapshot(snapshot: WorkspaceSnapshot, revision: number | null, legacyDigest: string | null = null, previousWiki?: WikiIndex, recordHistory = true) {
+  const visible = availableTree(snapshot.tree, true);
   const tabs = snapshot.openFiles.filter((id) => find(visible, id)?.kind === 'file');
+  const pinned = new Set(snapshot.pinnedFiles);
   return invoke<number | null>('save_workspace', {
     revision,
     legacyDigest,
+    history: recordHistory ? undefined : { enabled: false, snapshotIntervalMs: 0, maxVersionsPerNote: 1, maxAgeDays: null },
     snapshot: {
       wikiChanges: wikiLinkChanges(snapshot.wiki, previousWiki),
-      nodes: flattenTree(snapshot.tree),
+      nodes: flattenTree(snapshot.tree, buildWorkspaceTags(snapshot.tree, snapshot.managedTags)),
+      managedTags: snapshot.managedTags,
       expanded: snapshot.expanded,
-      tabs: tabs.map((id) => ({ id, active: Number(id === snapshot.active) })),
+      tabs: tabs.map((id) => ({ id, active: Number(id === snapshot.active), pinned: Number(pinned.has(id)) })),
     },
   });
 }
@@ -93,21 +100,28 @@ async function readLegacyBackup(imported: string | null): Promise<string | null>
 
 async function restoreWorkspace(stored: StoredWorkspace) {
   const tree = restoreTree(stored.nodes);
-  const visible = availableTree(tree);
+  const visible = availableTree(tree, true);
   const tabs = stored.tabs.filter(({ id }) => find(visible, id)?.kind === 'file');
   const snapshot: WorkspaceSnapshot = {
     tree,
     wiki: buildWikiIndex(tree, stored.wikiLinks ?? undefined),
     openFiles: tabs.map(({ id }) => id),
+    pinnedFiles: tabs.filter(({ pinned }) => pinned === 1).map(({ id }) => id),
     active: tabs.find(({ active }) => active)?.id ?? tabs[tabs.length - 1]?.id ?? '',
     expanded: stored.expanded,
+    managedTags: stored.managedTags ?? [],
   };
   let revision = stored.revision;
-  if (stored.wikiLinks == null) {
-    const indexedRevision = await saveSnapshot(snapshot, revision);
+  const indexedTags = new Map(stored.nodes.filter((node) => node.tags).map(({ id, tags }) => [id, tags ?? []]));
+  const tagsNeedRefresh = listWorkspaceNotes(tree).some((note) => {
+    const stored = indexedTags.get(note.id);
+    return stored !== undefined && JSON.stringify(stored.map(tagKey).sort()) !== JSON.stringify(noteTags(note).map(tagKey).sort());
+  });
+  if (stored.wikiLinks == null || tagsNeedRefresh) {
+    const indexedRevision = await saveSnapshot(snapshot, revision, null, undefined, false);
     if (indexedRevision === null) {
       const current = await invoke<StoredWorkspace | null>('load_workspace');
-      if (!current?.wikiLinks) throw new Error('Wiki link indexing could not be confirmed.');
+      if (!current?.wikiLinks) throw new Error('Workspace indexing could not be confirmed.');
       return restoreWorkspace(current);
     }
     revision = indexedRevision;
@@ -129,6 +143,8 @@ async function loadWorkspace() {
     wiki: buildWikiIndex(tree),
     active,
     openFiles: active ? [active] : [],
+    pinnedFiles: [],
+    managedTags: [],
     expanded: find(visible, 'journal')?.kind === 'folder' ? ['journal'] : [],
   };
   const migratedLegacy = imported && legacy !== null ? await legacyDigest(legacy) : null;

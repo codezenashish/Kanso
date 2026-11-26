@@ -1,0 +1,29 @@
+[[permission]]
+identifier = "allow-workspace"
+description = "Load and save the local workspace."
+commands.allow = ["load_workspace", "save_workspace"]
+
+[[permission]]
+identifier = "allow-managed-attachments"
+description = "Import through the native picker and resolve or open a note's managed attachments."
+commands.allow = ["import_attachment", "resolve_attachment", "open_attachment", "import_attachment_bytes", "read_attachment_image"]
+
+[[permission]]
+identifier = "allow-version-history"
+description = "List, inspect, create, prune, configure, and restore note version history."
+commands.allow = ["list_note_versions", "get_note_version", "create_note_version", "prune_note_versions", "get_version_history_config", "update_version_history_config", "restore_note_version"]
+
+[[permission]]
+identifier = "allow-attachment-management"
+description = "Review and clean unused attachments, and export or restore a portable backup."
+commands.allow = [
+  "attachment_storage",
+  "cleanup_attachments",
+  "export_attachment_backup",
+  "restore_attachment_backup"
+]
+
+[[permission]]
+identifier = "allow-markdown-transfer"
+description = "Import and export Markdown through scoped native pickers."
+commands.allow = ["pick_markdown_import", "export_markdown_files"]

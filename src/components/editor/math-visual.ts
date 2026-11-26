@@ -1,9 +1,9 @@
-import { closeHistory } from 'prosemirror-history';
-import { Node as EditorNode } from 'prosemirror-model';
-import { NodeSelection, Plugin, PluginKey, TextSelection, type Transaction } from 'prosemirror-state';
-import type { EditorView, NodeView } from 'prosemirror-view';
+import { Extension, Node as TiptapNode } from '@tiptap/core';
+import { closeHistory } from '@tiptap/pm/history';
+import { Node as EditorNode } from '@tiptap/pm/model';
+import { NodeSelection, Plugin, PluginKey, TextSelection, type Transaction } from '@tiptap/pm/state';
+import type { EditorView, NodeView } from '@tiptap/pm/view';
 import { renderMathElement } from './math-render';
-import { visualSchema } from './visual-markdown';
 
 export type MathMode = 'inline' | 'block';
 
@@ -22,8 +22,6 @@ export type MathEditorIntent =
   | { type: 'insert'; mode: MathMode; from: number; to: number; initialLatex: string };
 
 export const mathEditorMetaKey = new PluginKey<MathEditorIntent | null>('mathEditor');
-
-const { inline_math: inlineMathNode, math_block: mathBlockNode, paragraph } = visualSchema.nodes;
 
 class MathNodeView implements NodeView {
   dom: HTMLElement;
@@ -86,6 +84,7 @@ export function mathVisualPlugin(publish: (session: MathEditorSession | null) =>
   }
 
   function openExistingNode(view: EditorView, pos: number) {
+    const { inline_math: inlineMathNode, math_block: mathBlockNode } = view.state.schema.nodes;
     const node = view.state.doc.nodeAt(pos);
     if (!node || (node.type !== inlineMathNode && node.type !== mathBlockNode)) return;
     const mode: MathMode = node.type === mathBlockNode ? 'block' : 'inline';
@@ -160,6 +159,7 @@ export function mathVisualPlugin(publish: (session: MathEditorSession | null) =>
       anchorRect: clampRect(caret),
       apply(nextLatex, nextMode) {
         const { state } = view;
+        const { inline_math: inlineMathNode, math_block: mathBlockNode, paragraph } = state.schema.nodes;
         const safeFrom = Math.min(intent.from, state.doc.content.size);
         const safeTo = Math.min(intent.to, state.doc.content.size);
         if (!nextLatex.trim()) {
@@ -224,13 +224,9 @@ export function mathVisualPlugin(publish: (session: MathEditorSession | null) =>
       },
     },
     props: {
-      nodeViews: {
-        inline_math: (node) => new MathNodeView(node, false),
-        math_block: (node) => new MathNodeView(node, true),
-      },
       handleClickOn(view, _pos, node, nodePos, event) {
         if (event.button !== 0) return false;
-        if (node.type !== inlineMathNode && node.type !== mathBlockNode) return false;
+        if (node.type.name !== 'inline_math' && node.type.name !== 'math_block') return false;
         event.preventDefault();
         const tr = view.state.tr.setSelection(NodeSelection.create(view.state.doc, nodePos));
         view.dispatch(tr);
@@ -240,6 +236,7 @@ export function mathVisualPlugin(publish: (session: MathEditorSession | null) =>
       handleTextInput(view, from, to, text) {
         if (text !== '$' || !view.state.selection.empty) return false;
         const { state } = view;
+        const { inline_math: inlineMathNode, math_block: mathBlockNode, paragraph } = state.schema.nodes;
         const { $from } = state.selection;
         if ($from.parent.type.spec.code) return false;
         const activeMarks = state.storedMarks ?? $from.marks();
@@ -284,7 +281,8 @@ export function mathVisualPlugin(publish: (session: MathEditorSession | null) =>
       handleKeyDown(view, event) {
         if (event.isComposing || view.composing) return false;
         if (event.key !== 'Enter' || event.shiftKey || event.metaKey || event.ctrlKey || event.altKey) return false;
-        const { selection } = view.state;
+        const { selection, schema } = view.state;
+        const { inline_math: inlineMathNode, math_block: mathBlockNode, paragraph } = schema.nodes;
         if (selection instanceof NodeSelection && (selection.node.type === inlineMathNode || selection.node.type === mathBlockNode)) {
           event.preventDefault();
           openExistingNode(view, selection.from);
@@ -337,3 +335,82 @@ export function mathVisualPlugin(publish: (session: MathEditorSession | null) =>
     },
   });
 }
+
+export const InlineMathExtension = TiptapNode.create({
+  name: 'inline_math',
+  inline: true,
+  group: 'inline',
+  atom: true,
+  selectable: true,
+
+  addAttributes() {
+    return {
+      latex: {
+        default: '',
+        parseHTML: (element) => element.getAttribute('data-latex') ?? '',
+      },
+    };
+  },
+
+  parseHTML() {
+    return [{ tag: 'span[data-math-inline]' }];
+  },
+
+  renderHTML({ node }) {
+    return [
+      'span',
+      { 'data-math-inline': '', 'data-latex': node.attrs.latex, contenteditable: 'false' },
+      `$${node.attrs.latex}$`,
+    ];
+  },
+
+  addNodeView() {
+    return ({ node }) => new MathNodeView(node, false);
+  },
+});
+
+export const MathBlockExtension = TiptapNode.create({
+  name: 'math_block',
+  group: 'block',
+  atom: true,
+  selectable: true,
+
+  addAttributes() {
+    return {
+      latex: {
+        default: '',
+        parseHTML: (element) => element.getAttribute('data-latex') ?? '',
+      },
+    };
+  },
+
+  parseHTML() {
+    return [{ tag: 'div[data-math-block]' }];
+  },
+
+  renderHTML({ node }) {
+    return [
+      'div',
+      { 'data-math-block': '', 'data-latex': node.attrs.latex, contenteditable: 'false' },
+      `$$\n${node.attrs.latex}\n$$`,
+    ];
+  },
+
+  addNodeView() {
+    return ({ node }) => new MathNodeView(node, true);
+  },
+});
+
+export const MathVisualExtension = Extension.create<{
+  onSessionChange: (session: MathEditorSession | null) => void;
+}>({
+  name: 'mathVisual',
+  addOptions() {
+    return {
+      onSessionChange: () => {},
+    };
+  },
+  addProseMirrorPlugins() {
+    return [mathVisualPlugin(this.options.onSessionChange)];
+  },
+});

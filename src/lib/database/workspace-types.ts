@@ -15,10 +15,15 @@ export type WorkspaceNode = {
   children?: WorkspaceNode[];
 };
 
-export type WorkspaceSnapshot = {
-  tree: WorkspaceNode[];
-  wiki: WikiIndex;
+export type TabSession = {
   active: string;
   openFiles: string[];
+  pinnedFiles: string[];
+};
+
+export type WorkspaceSnapshot = TabSession & {
+  tree: WorkspaceNode[];
+  wiki: WikiIndex;
+  managedTags: string[];
   expanded: string[];
 };

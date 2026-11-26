@@ -1,14 +1,17 @@
-import { useImperativeHandle, useRef, type Ref } from 'react';
+import { useImperativeHandle, useRef, type CSSProperties, type Ref } from 'react';
 import { FileText, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import type { WorkspaceNode } from '@/lib/workspace-tree';
+import { getNoteFormat, type WorkspaceNode } from '@/lib/workspace-tree';
+import { updateSettings, useSettings } from '@/lib/settings';
+import type { EditorLayout } from './editor-layout';
 import type { EditorView } from './editor-header';
 import type { WikiEditorActions } from './wiki-visual';
 import { MarkdownEditor, type MarkdownEditorHandle } from './markdown-editor';
 
 export type EditorWorkspaceHandle = {
-  navigateToOffset: (offset: number) => void;
+  navigateToOffset: (offset: number, end?: number) => void;
   rememberSelection: () => void;
+  focus: () => void;
 };
 
 type EditorWorkspaceProps = {
@@ -17,14 +20,25 @@ type EditorWorkspaceProps = {
   view: EditorView;
   wiki: WikiEditorActions;
   onChangeContent: (content: string) => void;
+  onPrepareAttachment: () => Promise<boolean>;
   onCreateNote: () => void;
 };
 
-export function EditorWorkspace({ ref, note, view, wiki, onChangeContent, onCreateNote }: EditorWorkspaceProps) {
+function changeEditorLayout(editorLayout: EditorLayout) {
+  updateSettings({ editorLayout });
+}
+
+export function EditorWorkspace({ ref, note, view, wiki, onChangeContent, onPrepareAttachment, onCreateNote }: EditorWorkspaceProps) {
+  const { editorLayout, editorFont, editorFontSize, editorLineHeight } = useSettings();
+  const typography = {
+    '--editor-font-size': `${editorFontSize / 16}rem`,
+    '--editor-line-height': editorLineHeight ?? undefined,
+  } as CSSProperties;
   const editorRef = useRef<MarkdownEditorHandle>(null);
   useImperativeHandle(ref, () => ({
-    navigateToOffset: (offset) => editorRef.current?.navigateToOffset(offset),
+    navigateToOffset: (offset, end) => editorRef.current?.navigateToOffset(offset, end),
     rememberSelection: () => editorRef.current?.rememberSelection(),
+    focus: () => editorRef.current?.focus(),
   }), []);
 
   if (!note) {
@@ -40,15 +54,21 @@ export function EditorWorkspace({ ref, note, view, wiki, onChangeContent, onCrea
     );
   }
 
+  const format = getNoteFormat(note.name);
+
   return (
-    <section id="editor-workspace" aria-label="Editor" className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden px-4 pb-5 md:px-6">
+    <section id="editor-workspace" aria-label="Editor" data-editor-font={editorFont} style={typography} className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden px-4 pb-5 md:px-6">
       <MarkdownEditor
-        key={note.id}
+        key={`${note.id}:${format}`}
         ref={editorRef}
+        noteId={note.id}
+        onPrepareAttachment={onPrepareAttachment}
         value={note.content ?? ''}
         view={view}
+        layout={editorLayout}
+        onChangeLayout={changeEditorLayout}
         wiki={wiki}
-        sourceLabel={/\.txt$/i.test(note.name) ? 'Plain text' : /\.ya?ml$/i.test(note.name) ? 'YAML source' : undefined}
+        sourceLabel={format === 'text' ? 'Plain text' : format === 'yaml' ? 'YAML source' : undefined}
         onChange={onChangeContent}
       />
     </section>
